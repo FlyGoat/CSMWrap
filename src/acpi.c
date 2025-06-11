@@ -1,5 +1,6 @@
 #include <efi.h>
 #include <io.h>
+#include <pci.h>
 #include <printf.h>
 #include "csmwrap.h"
 
@@ -38,11 +39,16 @@ void uacpi_kernel_unmap(EFI_UNUSED void *ptr, EFI_UNUSED uacpi_size len) {
 
 uacpi_status uacpi_kernel_pci_device_open(uacpi_pci_address address, uacpi_handle *out_handle) {
     void *handle;
-    if (gBS->AllocatePool(EfiLoaderData, sizeof(uacpi_pci_address), &handle) != EFI_SUCCESS) {
+    if (gBS->AllocatePool(EfiLoaderData, sizeof(struct pci_address), &handle) != EFI_SUCCESS) {
         return UACPI_STATUS_OUT_OF_MEMORY;
     }
 
-    memcpy(handle, &address, sizeof(uacpi_pci_address));
+    struct pci_address *pci_address = (struct pci_address *)handle;
+    pci_address->segment = address.segment;
+    pci_address->bus = address.bus;
+    pci_address->slot = address.device;
+    pci_address->function = address.function;
+
     *out_handle = handle;
     return UACPI_STATUS_OK;
 }
@@ -52,38 +58,32 @@ void uacpi_kernel_pci_device_close(uacpi_handle handle) {
 }
 
 uacpi_status uacpi_kernel_pci_read8(uacpi_handle device, uacpi_size offset, uacpi_u8 *value) {
-    uacpi_pci_address *address = (uacpi_pci_address *)device;
-    *value = pciConfigReadByte(address->bus, address->device, address->function, offset);
+    *value = pci_read8((struct pci_address *)device, offset);
     return UACPI_STATUS_OK;
 }
 
 uacpi_status uacpi_kernel_pci_read16(uacpi_handle device, uacpi_size offset, uacpi_u16 *value) {
-    uacpi_pci_address *address = (uacpi_pci_address *)device;
-    *value = pciConfigReadWord(address->bus, address->device, address->function, offset);
+    *value = pci_read16((struct pci_address *)device, offset);
     return UACPI_STATUS_OK;
 }
 
 uacpi_status uacpi_kernel_pci_read32(uacpi_handle device, uacpi_size offset, uacpi_u32 *value) {
-    uacpi_pci_address *address = (uacpi_pci_address *)device;
-    *value = pciConfigReadDWord(address->bus, address->device, address->function, offset);
+    *value = pci_read32((struct pci_address *)device, offset);
     return UACPI_STATUS_OK;
 }
 
 uacpi_status uacpi_kernel_pci_write8(uacpi_handle device, uacpi_size offset, uacpi_u8 value) {
-    uacpi_pci_address *address = (uacpi_pci_address *)device;
-    pciConfigWriteByte(address->bus, address->device, address->function, offset, value);
+    pci_write8((struct pci_address *)device, offset, value);
     return UACPI_STATUS_OK;
 }
 
 uacpi_status uacpi_kernel_pci_write16(uacpi_handle device, uacpi_size offset, uacpi_u16 value) {
-    uacpi_pci_address *address = (uacpi_pci_address *)device;
-    pciConfigWriteWord(address->bus, address->device, address->function, offset, value);
+    pci_write16((struct pci_address *)device, offset, value);
     return UACPI_STATUS_OK;
 }
 
 uacpi_status uacpi_kernel_pci_write32(uacpi_handle device, uacpi_size offset, uacpi_u32 value) {
-    uacpi_pci_address *address = (uacpi_pci_address *)device;
-    pciConfigWriteDWord(address->bus, address->device, address->function, offset, value);
+    pci_write32((struct pci_address *)device, offset, value);
     return UACPI_STATUS_OK;
 }
 

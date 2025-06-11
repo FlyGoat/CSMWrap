@@ -39,6 +39,8 @@ struct csmwrap_priv {
     struct cb_framebuffer cb_fb;
 };
 
+extern struct csmwrap_priv priv;
+
 extern int unlock_bios_region();
 extern int build_coreboot_table(struct csmwrap_priv *priv);
 bool acpi_init(struct csmwrap_priv *priv);
