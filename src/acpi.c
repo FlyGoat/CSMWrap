@@ -369,12 +369,19 @@ bool acpi_init(struct csmwrap_priv *priv) {
             g_rsdp = (uintptr_t)table->VendorTable;
             break;
         }
+    }
 
-        if (!efi_guidcmp(table->VendorGuid, acpiGuid)) {
-            printf("Found ACPI 1.0 RSDT at %x, copied to %x\n", (uintptr_t)table->VendorTable, (uintptr_t)table_target);
-            memcpy(table_target, table->VendorTable, sizeof(EFI_ACPI_1_0_ROOT_SYSTEM_DESCRIPTION_POINTER));
-            g_rsdp = (uintptr_t)table->VendorTable;
-            break;
+    if (g_rsdp == 0) {
+        for (i = 0; i < gST->NumberOfTableEntries; i++) {
+            EFI_CONFIGURATION_TABLE *table;
+            table = gST->ConfigurationTable + i;
+
+            if (!efi_guidcmp(table->VendorGuid, acpiGuid)) {
+                printf("Found ACPI 1.0 RSDT at %x, copied to %x\n", (uintptr_t)table->VendorTable, (uintptr_t)table_target);
+                memcpy(table_target, table->VendorTable, sizeof(EFI_ACPI_1_0_ROOT_SYSTEM_DESCRIPTION_POINTER));
+                g_rsdp = (uintptr_t)table->VendorTable;
+                break;
+            }
         }
     }
 
