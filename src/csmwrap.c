@@ -98,14 +98,22 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
     gBS = SystemTable->BootServices;
     gRT = SystemTable->RuntimeServices;
 
+    printf("%s", banner);
+
+    for (uintptr_t i = 0; i < 0x100000; i += EFI_PAGE_SIZE) {
+        uintptr_t j = i;
+        if (gBS->AllocatePages(AllocateAddress, EfiLoaderData, 1, &j) != EFI_SUCCESS) {
+            if (i < 0xa0000) {
+                printf("warning: Early AllocatePages() failed for address %p\n", i);
+            }
+        }
+    }
+
     if (gRT->GetTime(&gTimeAtBoot, NULL) != EFI_SUCCESS) {
         printf("Failed to query current time\n");
         return -1;
     }
 
-    printf("%s", banner);
-
-    gBS->RaiseTPL(TPL_NOTIFY);
     gBS->SetWatchdogTimer(0, 0, 0, NULL);
 
     if (unlock_bios_region()) {
