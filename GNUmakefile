@@ -1,5 +1,4 @@
-# Nuke built-in rules and variables.
-MAKEFLAGS += -rR
+# Nuke built-in rules.
 .SUFFIXES:
 
 # This is the name that our final executable will have.
@@ -64,7 +63,7 @@ CFLAGS := -g -O2 -pipe
 CPPFLAGS :=
 
 # User controllable nasm flags.
-NASMFLAGS := -F dwarf -g
+NASMFLAGS := -g
 
 # User controllable linker flags. We set none by default.
 LDFLAGS :=
@@ -104,6 +103,7 @@ override CFLAGS += \
     -fno-stack-protector \
     -fno-stack-check \
     -fshort-wchar \
+    -fno-lto \
     -fPIE \
     -ffunction-sections \
     -fdata-sections
@@ -111,7 +111,7 @@ override CFLAGS += \
 # Internal C preprocessor flags that should not be changed by the user.
 override CPPFLAGS := \
     -I src \
-    -I nyu-efi/inc \
+    -I picoefi/inc \
     -I uACPI/include \
     -DUACPI_OVERRIDE_CONFIG \
     -DBUILD_VERSION=\"$(BUILD_VERSION)\" \
@@ -121,7 +121,8 @@ override CPPFLAGS := \
     -MP
 
 # Internal nasm flags that should not be changed by the user.
-override NASMFLAGS += \
+override NASMFLAGS := \
+    $(patsubst -g,-g -F dwarf,$(NASMFLAGS)) \
     -Wall
 
 # Architecture specific internal flags.
@@ -170,25 +171,23 @@ override LDFLAGS += \
     -z text \
     -z max-page-size=0x1000 \
     --gc-sections \
-    -T nyu-efi/$(ARCH)/link_script.lds
+    -T picoefi/$(ARCH)/link_script.lds
 
-# Use "find" to glob all *.c, *.S, and *.asm{32,64} files in the tree and obtain the
-# object and header dependency file names.
-override SRCFILES := $(shell find -L src cc-runtime/src nyu-efi/$(ARCH) uACPI/source -type f 2>/dev/null | LC_ALL=C sort)
+# Use "find" to glob all *.c, *.S, and *.asm files in the tree
+# (except the src/arch/* directories, as those are gonna be added
+# in the next step).
+override SRCFILES := $(shell find -L src cc-runtime/src picoefi/$(ARCH) uACPI/source -type f -not -path 'src/arch/*' 2>/dev/null | LC_ALL=C sort)
+# Add architecture specific files, if they exist.
+override SRCFILES += $(shell find -L src/arch/$(ARCH) -type f 2>/dev/null | LC_ALL=C sort)
+# Obtain the object and header dependencies file names.
 override CFILES := $(filter %.c,$(SRCFILES))
 override ASFILES := $(filter %.S,$(SRCFILES))
-ifeq ($(ARCH),ia32)
-override NASMFILES := $(filter %.asm32,$(SRCFILES))
-endif
-ifeq ($(ARCH),x86_64)
-override NASMFILES := $(filter %.asm64,$(SRCFILES))
+ifneq ($(filter $(ARCH),ia32 x86_64),)
+override NASMFILES := $(filter %.asm,$(SRCFILES))
 endif
 override OBJ := $(addprefix obj-$(ARCH)/,$(CFILES:.c=.c.o) $(ASFILES:.S=.S.o))
-ifeq ($(ARCH),ia32)
-override OBJ += $(addprefix obj-$(ARCH)/,$(NASMFILES:.asm32=.asm32.o))
-endif
-ifeq ($(ARCH),x86_64)
-override OBJ += $(addprefix obj-$(ARCH)/,$(NASMFILES:.asm64=.asm64.o))
+ifneq ($(filter $(ARCH),ia32 x86_64),)
+override OBJ += $(addprefix obj-$(ARCH)/,$(NASMFILES:.asm=.asm.o))
 endif
 override HEADER_DEPS := $(addprefix obj-$(ARCH)/,$(CFILES:.c=.c.d) $(ASFILES:.S=.S.d))
 
@@ -210,36 +209,29 @@ obj-$(ARCH)/src/printf.c.o: override CPPFLAGS += \
 
 # Rule to convert the final ELF executable to a .EFI PE executable.
 bin-$(ARCH)/$(OUTPUT).efi: bin-$(ARCH)/$(OUTPUT) GNUmakefile
-	mkdir -p "$$(dirname $@)"
+	mkdir -p "$(dir $@)"
 	$(OBJCOPY) -O binary $< $@
 	dd if=/dev/zero of=$@ bs=4096 count=0 seek=$$(( ($$(wc -c < $@) + 4095) / 4096 )) 2>/dev/null
 
 # Link rules for the final executable.
-bin-$(ARCH)/$(OUTPUT): GNUmakefile nyu-efi/$(ARCH)/link_script.lds $(OBJ)
-	mkdir -p "$$(dirname $@)"
-	$(LD) $(OBJ) $(LDFLAGS) -o $@
+bin-$(ARCH)/$(OUTPUT): GNUmakefile picoefi/$(ARCH)/link_script.lds $(OBJ)
+	mkdir -p "$(dir $@)"
+	$(LD) $(LDFLAGS) $(OBJ) -o $@
 
 # Compilation rules for *.c files.
 obj-$(ARCH)/%.c.o: %.c GNUmakefile
-	mkdir -p "$$(dirname $@)"
+	mkdir -p "$(dir $@)"
 	$(CC) $(CFLAGS) $(CPPFLAGS) -c $< -o $@
 
 # Compilation rules for *.S files.
 obj-$(ARCH)/%.S.o: %.S GNUmakefile
-	mkdir -p "$$(dirname $@)"
+	mkdir -p "$(dir $@)"
 	$(CC) $(CFLAGS) $(CPPFLAGS) -c $< -o $@
 
-ifeq ($(ARCH),ia32)
-# Compilation rules for *.asm32 (nasm) files.
-obj-$(ARCH)/%.asm32.o: %.asm32 GNUmakefile
-	mkdir -p "$$(dirname $@)"
-	nasm $(NASMFLAGS) $< -o $@
-endif
-
-ifeq ($(ARCH),x86_64)
-# Compilation rules for *.asm64 (nasm) files.
-obj-$(ARCH)/%.asm64.o: %.asm64 GNUmakefile
-	mkdir -p "$$(dirname $@)"
+ifneq ($(filter $(ARCH),ia32 x86_64),)
+# Compilation rules for *.asm (nasm) files.
+obj-$(ARCH)/%.asm.o: %.asm GNUmakefile
+	mkdir -p "$(dir $@)"
 	nasm $(NASMFLAGS) $< -o $@
 endif
 
