@@ -236,24 +236,19 @@ obj-$(ARCH)/%.asm.o: %.asm GNUmakefile
 endif
 
 # Rules to download the UEFI firmware per architecture for testing.
-ovmf/ovmf-code-$(ARCH).fd:
-	mkdir -p ovmf
-	curl -Lo $@ https://github.com/osdev0/edk2-ovmf-nightly/releases/latest/download/ovmf-code-$(ARCH).fd
-
-ovmf/ovmf-vars-$(ARCH).fd:
-	mkdir -p ovmf
-	curl -Lo $@ https://github.com/osdev0/edk2-ovmf-nightly/releases/latest/download/ovmf-vars-$(ARCH).fd
+edk2-ovmf:
+	curl -L https://github.com/osdev0/edk2-ovmf-nightly/releases/latest/download/edk2-ovmf.tar.gz | gunzip | tar -xf -
 
 # Rules for running our executable in QEMU.
 .PHONY: run
-run: all ovmf/ovmf-code-$(ARCH).fd ovmf/ovmf-vars-$(ARCH).fd
+run: all edk2-ovmf
 	mkdir -p boot/EFI/BOOT
 ifeq ($(ARCH),ia32)
 	cp bin-$(ARCH)/$(OUTPUT).efi boot/EFI/BOOT/BOOTIA32.EFI
 	qemu-system-i386 \
 		-M q35 \
-		-drive if=pflash,unit=0,format=raw,file=ovmf/ovmf-code-$(ARCH).fd,readonly=on \
-		-drive if=pflash,unit=1,format=raw,file=ovmf/ovmf-vars-$(ARCH).fd \
+		-drive if=pflash,unit=0,format=raw,file=edk2-ovmf/ovmf-code-$(ARCH).fd,readonly=on \
+		-drive if=pflash,unit=1,format=raw,file=edk2-ovmf/ovmf-vars-$(ARCH).fd \
 		-drive file=fat:rw:boot \
 		$(QEMUFLAGS)
 endif
@@ -261,8 +256,8 @@ ifeq ($(ARCH),x86_64)
 	cp bin-$(ARCH)/$(OUTPUT).efi boot/EFI/BOOT/BOOTX64.EFI
 	qemu-system-x86_64 \
 		-M q35 \
-		-drive if=pflash,unit=0,format=raw,file=ovmf/ovmf-code-$(ARCH).fd,readonly=on \
-		-drive if=pflash,unit=1,format=raw,file=ovmf/ovmf-vars-$(ARCH).fd \
+		-drive if=pflash,unit=0,format=raw,file=edk2-ovmf/ovmf-code-$(ARCH).fd,readonly=on \
+		-drive if=pflash,unit=1,format=raw,file=edk2-ovmf/ovmf-vars-$(ARCH).fd \
 		-drive file=fat:rw:boot \
 		$(QEMUFLAGS)
 endif
@@ -279,7 +274,7 @@ clean: seabios/.config
 distclean: seabios/.config
 	$(call SEABIOS_CALL,distclean)
 	rm -rf src/bins
-	rm -rf bin-* obj-* ovmf
+	rm -rf bin-* obj-* .cache compile_commands.json edk2-ovmf
 
 # Install the final built executable to its final on-root location.
 .PHONY: install

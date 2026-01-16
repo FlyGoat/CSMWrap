@@ -1,7 +1,7 @@
 /compile_commands.json
 /.cache
 /boot
-/ovmf
+/edk2-ovmf
 /src/bins
 /bin-*
 /obj-*
