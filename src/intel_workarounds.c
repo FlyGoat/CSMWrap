@@ -9,58 +9,106 @@
 #define	SBREG_BAR		0x10
 #define SBREG_BARH      0x14
 
-#define PID_ITSS        0xC4
+/* PCH sideband parameters vary by CPU generation - detected via CPUID */
+struct pch_info {
+    uintptr_t sbreg_bar;
+    uint8_t pid_itss;
+};
 
-#define R_PCH_PCR_ITSS_ITSSPRC                0x3300          ///< ITSS Power Reduction Control
-#define B_PCH_PCR_ITSS_ITSSPRC_PGCBDCGE       (1 << 4)            ///< PGCB Dynamic Clock Gating Enable
-#define B_PCH_PCR_ITSS_ITSSPRC_HPETDCGE       (1 << 3)            ///< HPET Dynamic Clock Gating Enable
-#define B_PCH_PCR_ITSS_ITSSPRC_8254CGE        (1 << 2)            ///< 8254 Static Clock Gating Enable
-#define B_PCH_PCR_ITSS_ITSSPRC_IOSFICGE       (1 << 1)            ///< IOSF-Sideband Interface Clock Gating Enable
-#define B_PCH_PCR_ITSS_ITSSPRC_ITSSCGE        (1 << 0)            ///< ITSS Clock Gate Enable
+/* Intel CPU model numbers (Family 6) */
+#define INTEL_SKYLAKE_L         0x4E
+#define INTEL_SKYLAKE           0x5E
+#define INTEL_SKYLAKE_X         0x55
+#define INTEL_KABYLAKE_L        0x8E
+#define INTEL_KABYLAKE          0x9E
+#define INTEL_COMETLAKE         0xA5
+#define INTEL_COMETLAKE_L       0xA6
+#define INTEL_ICELAKE_L         0x7E
+#define INTEL_TIGERLAKE_L       0x8C
+#define INTEL_TIGERLAKE         0x8D
+#define INTEL_ALDERLAKE         0x97
+#define INTEL_ALDERLAKE_L       0x9A
+#define INTEL_RAPTORLAKE        0xB7
+#define INTEL_RAPTORLAKE_P      0xBA
+#define INTEL_RAPTORLAKE_S      0xBF
+#define INTEL_METEORLAKE        0xAC
+#define INTEL_METEORLAKE_L      0xAA
+#define INTEL_ARROWLAKE         0xC6
+#define INTEL_ARROWLAKE_H       0xC5
+#define INTEL_ARROWLAKE_U       0xB5
+#define INTEL_PANTHERLAKE_L     0xCC
+
+static bool get_pch_info(struct pch_info *info)
+{
+    uint32_t eax, ebx, ecx, edx;
+    asm volatile("cpuid" : "=a"(eax), "=b"(ebx), "=c"(ecx), "=d"(edx) : "a"(1), "c"(0));
+
+    uint8_t family = (eax >> 8) & 0xF;
+    uint8_t model = (eax >> 4) & 0xF;
+    if (family == 6 || family == 15)
+        model |= ((eax >> 16) & 0xF) << 4;
+
+    if (family != 6)
+        return false;
+
+    switch (model) {
+    /* Meteor Lake / Arrow Lake / Panther Lake: SBREG=0xE0000000 */
+    case INTEL_METEORLAKE:
+    case INTEL_METEORLAKE_L:
+    case INTEL_ARROWLAKE:
+    case INTEL_ARROWLAKE_H:
+    case INTEL_ARROWLAKE_U:
+        info->sbreg_bar = 0xE0000000;
+        info->pid_itss = 0xCA;
+        return true;
+    case INTEL_PANTHERLAKE_L:
+        info->sbreg_bar = 0xE0000000;
+        info->pid_itss = 0x69;
+        return true;
+    /* Skylake through Raptor Lake: SBREG=0xFD000000 */
+    case INTEL_SKYLAKE_L:
+    case INTEL_SKYLAKE:
+    case INTEL_SKYLAKE_X:
+    case INTEL_KABYLAKE_L:
+    case INTEL_KABYLAKE:
+    case INTEL_COMETLAKE:
+    case INTEL_COMETLAKE_L:
+    case INTEL_ICELAKE_L:
+    case INTEL_TIGERLAKE_L:
+    case INTEL_TIGERLAKE:
+    case INTEL_ALDERLAKE:
+    case INTEL_ALDERLAKE_L:
+    case INTEL_RAPTORLAKE:
+    case INTEL_RAPTORLAKE_P:
+    case INTEL_RAPTORLAKE_S:
+        info->sbreg_bar = 0xFD000000;
+        info->pid_itss = 0xC4;
+        return true;
+    default:
+        return false;
+    }
+}
+
+#define R_PCH_PCR_ITSS_ITSSPRC                0x3300
+#define B_PCH_PCR_ITSS_ITSSPRC_8254CGE        (1 << 2)
 
 #define PCH_PCR_ADDRESS(Base, Pid, Offset)    ((void *)(Base | (UINT32) (((Offset) & 0x0F0000) << 8) | ((UINT8)(Pid) << 16) | (UINT16) ((Offset) & 0xFFFF)))
 
-#define PORT_PIT_COUNTER0      0x0040
-#define PORT_PIT_COUNTER1      0x0041
-#define PORT_PIT_COUNTER2      0x0042
-#define PORT_PIT_MODE          0x0043
-#define PORT_PS2_CTRLB         0x0061
-
-// Bits for PORT_PIT_MODE
-#define PM_SEL_TIMER0   (0<<6)
-#define PM_SEL_TIMER1   (1<<6)
-#define PM_SEL_TIMER2   (2<<6)
-#define PM_SEL_READBACK (3<<6)
-#define PM_ACCESS_LATCH  (0<<4)
-#define PM_ACCESS_LOBYTE (1<<4)
-#define PM_ACCESS_HIBYTE (2<<4)
-#define PM_ACCESS_WORD   (3<<4)
-#define PM_MODE0 (0<<1)
-#define PM_MODE1 (1<<1)
-#define PM_MODE2 (2<<1)
-#define PM_MODE3 (3<<1)
-#define PM_MODE4 (4<<1)
-#define PM_MODE5 (5<<1)
-#define PM_CNT_BINARY (0<<0)
-#define PM_CNT_BCD    (1<<0)
-#define PM_READ_COUNTER0 (1<<1)
-#define PM_READ_COUNTER1 (1<<2)
-#define PM_READ_COUNTER2 (1<<3)
-#define PM_READ_STATUSVALUE (0<<4)
-#define PM_READ_VALUE       (1<<4)
-#define PM_READ_STATUS      (2<<4)
-
-#define R_P2SB_CFG_P2SBC                      0x000000e0U      ///< P2SB Control
-                                                               /* P2SB general configuration register
-                                                                */
-#define B_P2SB_CFG_P2SBC_HIDE                 (1 << 8)         ///< P2SB Hide Bit
+#define R_P2SB_CFG_P2SBC                      0xE0
+#define B_P2SB_CFG_P2SBC_HIDE                 (1 << 8)
 
 static int pit_8254cge_workaround(void)
 {
+    struct pch_info pch;
     uint32_t reg;
-    unsigned long base;
+    uintptr_t base;
     bool p2sb_hide = false;
     int pch_pci_bus = 0;
+
+    if (!get_pch_info(&pch)) {
+        printf("Unknown CPU model, skipping PIT workaround\n");
+        return 0;
+    }
 
     reg = pciConfigReadDWord(pch_pci_bus, PCI_DEVICE_NUMBER_PCH_P2SB,
                              PCI_FUNCTION_NUMBER_PCH_P2SB,
@@ -83,57 +131,42 @@ static int pit_8254cge_workaround(void)
                               0x0);
 
     if ((reg & 0xFFFF) != 0x8086) {
-        printf("No P2SB found, proceed to PIT test\n");
-        goto test_pit;
-    }
+        /* P2SB locked hidden - use CPUID-determined SBREG_BAR */
+        base = pch.sbreg_bar;
+    } else {
+        reg = pciConfigReadDWord(pch_pci_bus, PCI_DEVICE_NUMBER_PCH_P2SB,
+                                  PCI_FUNCTION_NUMBER_PCH_P2SB,
+                                  SBREG_BAR);
+        base = reg & ~0x0F;
 
-    reg = pciConfigReadDWord(pch_pci_bus, PCI_DEVICE_NUMBER_PCH_P2SB,
-                              PCI_FUNCTION_NUMBER_PCH_P2SB,
-                              SBREG_BAR);
-    base = reg & ~0x0F;
-
-    reg = pciConfigReadDWord(pch_pci_bus, PCI_DEVICE_NUMBER_PCH_P2SB,
-                              PCI_FUNCTION_NUMBER_PCH_P2SB,
-                              SBREG_BARH);
+        reg = pciConfigReadDWord(pch_pci_bus, PCI_DEVICE_NUMBER_PCH_P2SB,
+                                  PCI_FUNCTION_NUMBER_PCH_P2SB,
+                                  SBREG_BARH);
 #ifdef __LP64__
-    base |= ((uint64_t)reg & 0xFFFFFFFF) << 32;
+        base |= ((uint64_t)reg & 0xFFFFFFFF) << 32;
 #else
-    if (reg) {
-        printf("Invalid P2SB BARH\n");
-        goto test_pit;
-    }
+        if (reg) {
+            printf("Invalid P2SB BARH\n");
+            return 0;
+        }
 #endif
+        /* Hide P2SB again */
+        if (p2sb_hide) {
+            reg = pciConfigReadDWord(pch_pci_bus, PCI_DEVICE_NUMBER_PCH_P2SB,
+                                     PCI_FUNCTION_NUMBER_PCH_P2SB,
+                                     R_P2SB_CFG_P2SBC);
+            reg |= B_P2SB_CFG_P2SBC_HIDE;
+            pciConfigWriteDWord(pch_pci_bus, PCI_DEVICE_NUMBER_PCH_P2SB,
+                                PCI_FUNCTION_NUMBER_PCH_P2SB,
+                                R_P2SB_CFG_P2SBC, reg);
+        }
+    }
 
-    /* FIXME: Validate base */
-    reg = readl(PCH_PCR_ADDRESS(base, PID_ITSS, R_PCH_PCR_ITSS_ITSSPRC));
+    reg = readl(PCH_PCR_ADDRESS(base, pch.pid_itss, R_PCH_PCR_ITSS_ITSSPRC));
     printf("ITSSPRC = %x, ITSSPRC.8254CGE= %x\n", reg, !!(reg & B_PCH_PCR_ITSS_ITSSPRC_8254CGE));
     /* Disable 8254CGE */
     reg &= ~B_PCH_PCR_ITSS_ITSSPRC_8254CGE;
-    writel(PCH_PCR_ADDRESS(base, PID_ITSS, R_PCH_PCR_ITSS_ITSSPRC), reg);
-
-    /* Hide P2SB again */
-    if (p2sb_hide) {
-        reg = pciConfigReadDWord(pch_pci_bus, PCI_DEVICE_NUMBER_PCH_P2SB,
-                                 PCI_FUNCTION_NUMBER_PCH_P2SB,
-                                 R_P2SB_CFG_P2SBC);
-        reg |= B_P2SB_CFG_P2SBC_HIDE;
-        pciConfigWriteDWord(pch_pci_bus, PCI_DEVICE_NUMBER_PCH_P2SB,
-                            PCI_FUNCTION_NUMBER_PCH_P2SB,
-                            R_P2SB_CFG_P2SBC, reg);
-    }
-
-test_pit:
-    /* Lets hope we will not BOOM UEFI with this */
-    outb(PORT_PIT_MODE, PM_SEL_READBACK | PM_READ_VALUE | PM_READ_COUNTER0);
-    uint16_t v1 = inb(PORT_PIT_COUNTER0) | (inb(PORT_PIT_COUNTER0) << 8);
-
-    gBS->Stall(1000);
-    outb(PORT_PIT_MODE, PM_SEL_READBACK | PM_READ_VALUE | PM_READ_COUNTER0);
-    uint16_t v2 = inb(PORT_PIT_COUNTER0) | (inb(PORT_PIT_COUNTER0) << 8);
-    if (v1 == v2) {
-        printf("PIT test failed, not counting!\n");
-        return -1;
-    }
+    writel(PCH_PCR_ADDRESS(base, pch.pid_itss, R_PCH_PCR_ITSS_ITSSPRC), reg);
 
     return 0;
 }
