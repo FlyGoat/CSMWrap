@@ -153,8 +153,6 @@ static uint32_t convert_memory_type(EFI_MEMORY_TYPE type)
         case EfiConventionalMemory:
         case EfiLoaderCode:
         case EfiLoaderData:
-        case EfiBootServicesCode:
-        case EfiBootServicesData:
             return EfiAcpiAddressRangeMemory;
         case EfiACPIReclaimMemory:
             return EfiAcpiAddressRangeACPI;
@@ -162,6 +160,13 @@ static uint32_t convert_memory_type(EFI_MEMORY_TYPE type)
             return EfiAcpiAddressRangeNVS;
         case EfiUnusableMemory:
         case EfiReservedMemoryType:
+        /* Boot services memory can still be used by broken firmware even past exiting */
+        /* boot services. This workaround was originally introduced in commit 3b8eed41da, */
+        /* with a FIXME saying it was added in order to fix a Windows 0xA5 BSOD. */
+        /* Issues have additionally been identified on Arrow Lake hardware that the same */
+        /* workaround also fixes. */
+        case EfiBootServicesCode:
+        case EfiBootServicesData:
         case EfiRuntimeServicesCode:
         case EfiRuntimeServicesData:
         case EfiMemoryMappedIO:
