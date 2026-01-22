@@ -44,7 +44,7 @@ people.
 ## Credits & Acknowledgements
 
 *   The **[SeaBIOS project](https://www.seabios.org/)** for their CSM and VBIOS code.
-*   **[Nyu-EFI](https://codeberg.org/osdev/nyu-efi)** for the EFI C runtime, build system, and headers.
+*   **[PicoEFI](https://codeberg.org/PicoEFI/PicoEFI)** for the EFI C runtime, build system, and headers.
 *   **[EDK2 (TianoCore)](https://github.com/tianocore/edk2)** for UEFI specifications and some code snippets.
 *   **[uACPI](https://github.com/uACPI/uACPI)** for ACPI table handling.
 *   **@CanonKong** for test feedback and general knowledge.
