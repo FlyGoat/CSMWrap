@@ -56,6 +56,8 @@ efi_guidcmp (EFI_GUID left, EFI_GUID right)
 
 
 #define E820_MAX_ENTRIES 128
+#define MAX_BBS_ENTRIES 32
+#define BBS_DESC_STRING_SIZE 32
 
 #pragma pack(1)
 struct low_stub {
@@ -68,6 +70,11 @@ struct low_stub {
     /* E820 memory map */
     int e820_entries;
     EFI_E820_ENTRY64 e820_map[E820_MAX_ENTRIES];
+
+    /* BBS table for boot device priority */
+    size_t bbs_entry_count;
+    BBS_TABLE bbs_entries[MAX_BBS_ENTRIES];
+    char bbs_desc_strings[MAX_BBS_ENTRIES][BBS_DESC_STRING_SIZE];
 };
 #pragma pack()
 

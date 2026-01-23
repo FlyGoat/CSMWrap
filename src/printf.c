@@ -1,4 +1,5 @@
 #include <stdarg.h>
+#include <stddef.h>
 
 #define NANOPRINTF_IMPLEMENTATION
 #define NANOPRINTF_USE_FIELD_WIDTH_FORMAT_SPECIFIERS 1
@@ -36,6 +37,14 @@ int printf(const char *restrict fmt, ...) {
     va_list l;
     va_start(l, fmt);
     int ret = npf_vpprintf(_putchar, NULL, fmt, l);
+    va_end(l);
+    return ret;
+}
+
+int snprintf(char *buffer, size_t bufsz, const char *restrict fmt, ...) {
+    va_list l;
+    va_start(l, fmt);
+    int ret = npf_vsnprintf(buffer, bufsz, fmt, l);
     va_end(l);
     return ret;
 }
