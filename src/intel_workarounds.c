@@ -65,7 +65,20 @@ static bool get_pch_info(struct pch_info *info)
         info->sbreg_bar = 0xE0000000;
         info->pid_itss = 0x69;
         return true;
-    /* Skylake through Raptor Lake: SBREG=0xFD000000 */
+    /* Alder Lake / Raptor Lake Desktop (S-series, PCH-S): SBREG=0xE0000000 */
+    case INTEL_ALDERLAKE:
+    case INTEL_RAPTORLAKE:
+    case INTEL_RAPTORLAKE_S:
+        info->sbreg_bar = 0xE0000000;
+        info->pid_itss = 0xC4;
+        return true;
+    /* Alder Lake / Raptor Lake Mobile (P-series, PCH-P): SBREG=0xFD000000 */
+    case INTEL_ALDERLAKE_L:
+    case INTEL_RAPTORLAKE_P:
+        info->sbreg_bar = 0xFD000000;
+        info->pid_itss = 0xC4;
+        return true;
+    /* Skylake through Tiger Lake: SBREG=0xFD000000 */
     case INTEL_SKYLAKE_L:
     case INTEL_SKYLAKE:
     case INTEL_SKYLAKE_X:
@@ -76,11 +89,6 @@ static bool get_pch_info(struct pch_info *info)
     case INTEL_ICELAKE_L:
     case INTEL_TIGERLAKE_L:
     case INTEL_TIGERLAKE:
-    case INTEL_ALDERLAKE:
-    case INTEL_ALDERLAKE_L:
-    case INTEL_RAPTORLAKE:
-    case INTEL_RAPTORLAKE_P:
-    case INTEL_RAPTORLAKE_S:
         info->sbreg_bar = 0xFD000000;
         info->pid_itss = 0xC4;
         return true;
