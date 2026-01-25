@@ -39,9 +39,12 @@ struct csmwrap_priv {
     struct cb_framebuffer cb_fb;
 };
 
+extern struct csmwrap_priv priv;
+
 extern int unlock_bios_region();
 extern int build_coreboot_table(struct csmwrap_priv *priv);
 bool acpi_init(struct csmwrap_priv *priv);
+bool acpi_namespace_init(void);
 int build_e820_map(struct csmwrap_priv *priv, EFI_MEMORY_DESCRIPTOR *memory_map, UINTN memory_map_size, UINTN descriptor_size);
 int apply_intel_platform_workarounds(void);
 

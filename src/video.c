@@ -445,13 +445,6 @@ static EFI_STATUS csmwrap_video_seavgabios_init(struct csmwrap_priv *priv)
         return EFI_UNSUPPORTED;
     }
 
-#ifdef __LP64__
-    if (fb_addr > 0xffffffff) {
-        printf("Framebuffer is too high, try Disabling Above 4G \n");
-        return EFI_UNSUPPORTED;
-    }
-#endif
-
     cb_fb->physical_address = fb_addr;
     cb_fb->x_resolution = info->HorizontalResolution;
     cb_fb->y_resolution = info->VerticalResolution;
