@@ -49,56 +49,400 @@ static void *find_table(uint32_t signature, uint8_t *csm_bin_base, size_t size)
     return Table;
 }
 
+/*
+ * SMBIOS entry point structures
+ */
+#define SMBIOS_21_SIGNATURE 0x5f4d535f  /* "_SM_" */
+#define SMBIOS_21_ENTRY_POINT_LENGTH 0x1F  /* Standard length */
+
+#pragma pack(1)
+struct smbios_21_entry_point {
+    uint32_t signature;                    /* "_SM_" */
+    uint8_t checksum;                      /* Checksum of bytes 0x00-0x0F */
+    uint8_t length;                        /* Entry point length (usually 0x1F) */
+    uint8_t smbios_major_version;
+    uint8_t smbios_minor_version;
+    uint16_t max_structure_size;
+    uint8_t entry_point_revision;
+    uint8_t formatted_area[5];
+    char intermediate_anchor_string[5];    /* "_DMI_" */
+    uint8_t intermediate_checksum;         /* Checksum of bytes 0x10-0x1E */
+    uint16_t structure_table_length;       /* Total length of structure table */
+    uint32_t structure_table_address;      /* Physical address of structure table */
+    uint16_t number_of_structures;
+    uint8_t smbios_bcd_revision;
+};
+
+struct smbios_30_entry_point {
+    char signature[5];                     /* "_SM3_" */
+    uint8_t checksum;
+    uint8_t length;
+    uint8_t smbios_major_version;
+    uint8_t smbios_minor_version;
+    uint8_t smbios_docrev;
+    uint8_t entry_point_revision;
+    uint8_t reserved;
+    uint32_t structure_table_max_size;
+    uint64_t structure_table_address;      /* 64-bit! */
+};
+
+/* SMBIOS structure header - at the start of every structure */
+struct smbios_structure_header {
+    uint8_t type;
+    uint8_t length;    /* Length of formatted area only, not including strings */
+    uint16_t handle;
+};
+#pragma pack()
+
+static uint8_t smbios_checksum(const void *data, size_t len)
+{
+    const uint8_t *p = data;
+    uint8_t sum = 0;
+    for (size_t i = 0; i < len; i++)
+        sum += p[i];
+    return sum;
+}
+
+/*
+ * Statistics gathered from walking the SMBIOS structure table.
+ * Using uint32_t for sizes to avoid overflow during calculation,
+ * even though SMBIOS 2.x limits these to 16-bit values.
+ */
+struct smbios_table_stats {
+    uint32_t number_of_structures;
+    uint32_t max_structure_size;
+    uint32_t table_length;
+};
+
+/*
+ * Walk the SMBIOS structure table and gather statistics.
+ * The structure table format is the same for SMBIOS 2.x and 3.0.
+ *
+ * Each structure consists of:
+ * - Formatted area (header.length bytes, starting with the header)
+ * - Unformatted area (null-terminated strings, ending with double-null)
+ *
+ * Returns true on success, false if the table appears corrupted.
+ */
+static bool smbios_walk_table(const void *table, uint32_t max_size, struct smbios_table_stats *stats)
+{
+    const uint8_t *ptr = table;
+    const uint8_t *end = ptr + max_size;
+
+    stats->number_of_structures = 0;
+    stats->max_structure_size = 0;
+    stats->table_length = 0;
+
+    while (ptr + sizeof(struct smbios_structure_header) <= end) {
+        const struct smbios_structure_header *hdr = (const struct smbios_structure_header *)ptr;
+
+        /* Sanity check: length must be at least header size */
+        if (hdr->length < sizeof(struct smbios_structure_header)) {
+            printf("  Warning: Invalid structure length %u at offset %u\n",
+                   hdr->length, (uint32_t)(ptr - (const uint8_t *)table));
+            return false;
+        }
+
+        /* Check formatted area doesn't exceed bounds */
+        if (ptr + hdr->length > end) {
+            printf("  Warning: Structure exceeds table bounds\n");
+            return false;
+        }
+
+        /* Find the end of the unformatted area (strings) */
+        const uint8_t *strings_start = ptr + hdr->length;
+        const uint8_t *strings_ptr = strings_start;
+
+        /* Look for double-null terminator */
+        while (strings_ptr + 1 < end) {
+            if (strings_ptr[0] == 0 && strings_ptr[1] == 0) {
+                strings_ptr += 2;  /* Include both nulls */
+                break;
+            }
+            strings_ptr++;
+        }
+
+        if (strings_ptr + 1 >= end && !(strings_ptr[-2] == 0 && strings_ptr[-1] == 0)) {
+            /* Didn't find double-null before end - table might be truncated */
+            printf("  Warning: Missing double-null terminator\n");
+            return false;
+        }
+
+        /* Calculate this structure's total size */
+        uint32_t struct_size = (uint32_t)(strings_ptr - ptr);
+        if (struct_size > stats->max_structure_size) {
+            stats->max_structure_size = struct_size;
+        }
+
+        stats->number_of_structures++;
+
+        /* Type 127 marks end of table */
+        if (hdr->type == 127) {
+            stats->table_length = (uint32_t)(strings_ptr - (const uint8_t *)table);
+            return true;
+        }
+
+        ptr = strings_ptr;
+    }
+
+    /* Reached end without finding type 127 - use what we have */
+    stats->table_length = (uint32_t)(ptr - (const uint8_t *)table);
+    return true;
+}
+
+/*
+ * Allocated buffer for synthesized/relocated SMBIOS data.
+ */
+static void *smbios_buffer = NULL;
+
+/*
+ * Synthesize an SMBIOS 2.x entry point from SMBIOS 3.0 data.
+ * The structure table data format is identical; only the entry point differs.
+ *
+ * Allocates memory for entry point + structure table below 4GB.
+ * Returns the new SMBIOS 2.x entry point, or NULL on failure.
+ */
+static struct smbios_21_entry_point *synthesize_smbios_21_from_30(
+    struct smbios_30_entry_point *ep30,
+    uint64_t st_addr,
+    uint32_t st_max_size)
+{
+    /* Walk the structure table to get accurate statistics */
+    struct smbios_table_stats stats;
+    if (!smbios_walk_table((void *)(uintptr_t)st_addr, st_max_size, &stats)) {
+        printf("  Failed to parse SMBIOS structure table\n");
+        return NULL;
+    }
+
+    printf("  Table stats: %u structures, max size %u, actual length %u\n",
+           stats.number_of_structures, stats.max_structure_size, stats.table_length);
+
+    /* Check for SMBIOS 2.x limitations (16-bit fields) */
+    if (stats.table_length > 0xFFFF) {
+        printf("  Warning: Table length %u exceeds SMBIOS 2.x limit (65535)\n",
+               stats.table_length);
+        /* Truncate - some data will be missing but better than nothing */
+        stats.table_length = 0xFFFF;
+    }
+    if (stats.max_structure_size > 0xFFFF) {
+        printf("  Warning: Max structure size exceeds SMBIOS 2.x limit\n");
+        stats.max_structure_size = 0xFFFF;
+    }
+    if (stats.number_of_structures > 0xFFFF) {
+        printf("  Warning: Structure count exceeds SMBIOS 2.x limit\n");
+        stats.number_of_structures = 0xFFFF;
+    }
+
+    /* Allocate buffer for entry point + structure table below 4GB */
+    size_t total_size = SMBIOS_21_ENTRY_POINT_LENGTH + stats.table_length;
+    EFI_PHYSICAL_ADDRESS max_addr = 0xFFFFFFFF;
+    EFI_STATUS status = gBS->AllocatePages(
+        AllocateMaxAddress,
+        EfiRuntimeServicesData,
+        (total_size + EFI_PAGE_SIZE - 1) / EFI_PAGE_SIZE,
+        &max_addr
+    );
+
+    if (status != EFI_SUCCESS) {
+        printf("  Failed to allocate memory for SMBIOS synthesis\n");
+        return NULL;
+    }
+
+    smbios_buffer = (void *)(uintptr_t)max_addr;
+    printf("  Synthesizing SMBIOS 2.x at %p\n", smbios_buffer);
+
+    /* Build the SMBIOS 2.x entry point */
+    struct smbios_21_entry_point *ep21 = smbios_buffer;
+    memset(ep21, 0, SMBIOS_21_ENTRY_POINT_LENGTH);
+
+    ep21->signature = SMBIOS_21_SIGNATURE;
+    ep21->length = SMBIOS_21_ENTRY_POINT_LENGTH;
+    ep21->smbios_major_version = ep30->smbios_major_version;
+    ep21->smbios_minor_version = ep30->smbios_minor_version;
+    ep21->max_structure_size = (uint16_t)stats.max_structure_size;
+    ep21->entry_point_revision = 0;
+    memcpy(ep21->intermediate_anchor_string, "_DMI_", 5);
+    ep21->structure_table_length = (uint16_t)stats.table_length;
+    ep21->number_of_structures = stats.number_of_structures;
+
+    /* BCD revision: major in high nibble, minor in low nibble */
+    ep21->smbios_bcd_revision = ((ep30->smbios_major_version & 0xF) << 4) |
+                                 (ep30->smbios_minor_version & 0xF);
+
+    /* Copy structure table after entry point */
+    void *st_dest = (uint8_t *)smbios_buffer + SMBIOS_21_ENTRY_POINT_LENGTH;
+    memcpy(st_dest, (void *)(uintptr_t)st_addr, stats.table_length);
+    ep21->structure_table_address = (uint32_t)(uintptr_t)st_dest;
+
+    /* Calculate checksums */
+    ep21->checksum = 0;
+    ep21->intermediate_checksum = 0;
+    ep21->intermediate_checksum = -smbios_checksum((uint8_t *)ep21 + 0x10,
+                                                    SMBIOS_21_ENTRY_POINT_LENGTH - 0x10);
+    ep21->checksum = -smbios_checksum(ep21, 0x10);
+
+    printf("  Synthesis complete: SMBIOS %u.%u, %u structures, table at %x\n",
+           ep21->smbios_major_version, ep21->smbios_minor_version,
+           ep21->number_of_structures, ep21->structure_table_address);
+
+    return ep21;
+}
+
+#ifdef __x86_64__
+/*
+ * Relocate SMBIOS 2.x entry point and structure table to below 4GB.
+ * Only needed on 64-bit systems where SMBIOS data may be above 4GB.
+ * Returns the new entry point address, or NULL on failure.
+ */
+static struct smbios_21_entry_point *relocate_smbios_21(
+    struct smbios_21_entry_point *ep,
+    uint64_t st_addr,
+    uint32_t st_size)
+{
+    size_t ep_size = ep->length;
+    size_t total_size = ep_size + st_size;
+
+    /* Allocate below 4GB */
+    EFI_PHYSICAL_ADDRESS max_addr = 0xFFFFFFFF;
+    EFI_STATUS status = gBS->AllocatePages(
+        AllocateMaxAddress,
+        EfiRuntimeServicesData,
+        (total_size + EFI_PAGE_SIZE - 1) / EFI_PAGE_SIZE,
+        &max_addr
+    );
+
+    if (status != EFI_SUCCESS) {
+        printf("  Failed to allocate memory for SMBIOS relocation\n");
+        return NULL;
+    }
+
+    smbios_buffer = (void *)(uintptr_t)max_addr;
+    printf("  Relocating SMBIOS to %p\n", smbios_buffer);
+
+    /* Copy entry point */
+    struct smbios_21_entry_point *new_ep = smbios_buffer;
+    memcpy(new_ep, ep, ep_size);
+
+    /* Copy structure table right after entry point */
+    void *new_st = (uint8_t *)smbios_buffer + ep_size;
+    memcpy(new_st, (void *)(uintptr_t)st_addr, st_size);
+
+    /* Update structure table address in the new entry point */
+    new_ep->structure_table_address = (uint32_t)(uintptr_t)new_st;
+
+    /* Recalculate checksums */
+    new_ep->checksum = 0;
+    new_ep->intermediate_checksum = 0;
+    new_ep->intermediate_checksum = -smbios_checksum((uint8_t *)new_ep + 0x10, ep_size - 0x10);
+    new_ep->checksum = -smbios_checksum(new_ep, 0x10);
+
+    printf("  Relocation complete, new structure table at %x\n",
+           new_ep->structure_table_address);
+
+    return new_ep;
+}
+#endif /* __x86_64__ */
+
 int set_smbios_table()
 {
     EFI_GUID smbiosGuid = SMBIOS_TABLE_GUID;
     EFI_GUID smbios3Guid = SMBIOS3_TABLE_GUID;
-    uintptr_t table_addr = 0;
+    struct smbios_21_entry_point *result_ep = NULL;
 
+    /* First, try to find SMBIOS 2.x table (preferred for legacy compatibility) */
     for (size_t i = 0; i < gST->NumberOfTableEntries; i++) {
         EFI_CONFIGURATION_TABLE *table = gST->ConfigurationTable + i;
 
         if (!efi_guidcmp(table->VendorGuid, smbiosGuid)) {
-            uintptr_t addr = (uintptr_t)table->VendorTable;
-            printf("Found SMBIOS Table at %x\n", addr);
+            struct smbios_21_entry_point *ep = table->VendorTable;
+            printf("Found SMBIOS 2.x entry point at %p\n", (void *)ep);
+
+            /* Validate signature */
+            if (ep->signature != SMBIOS_21_SIGNATURE) {
+                printf("  Invalid signature, skipping\n");
+                continue;
+            }
+
+            /* Validate checksums */
+            if (smbios_checksum(ep, 0x10) != 0) {
+                printf("  Invalid entry point checksum, skipping\n");
+                continue;
+            }
+            if (memcmp(ep->intermediate_anchor_string, "_DMI_", 5) != 0) {
+                printf("  Invalid DMI anchor, skipping\n");
+                continue;
+            }
+            if (smbios_checksum((uint8_t *)ep + 0x10, ep->length - 0x10) != 0) {
+                printf("  Invalid intermediate checksum, skipping\n");
+                continue;
+            }
+
+            printf("  Version: %u.%u, structure table at %x, length %u\n",
+                   ep->smbios_major_version, ep->smbios_minor_version,
+                   ep->structure_table_address, ep->structure_table_length);
+
 #ifdef __x86_64__
-            /* Skip tables above 4GB - unusable by 32-bit legacy BIOS */
-            if (addr >= 0x100000000ULL) {
-                break;  /* Try SMBIOS 3.0 instead */
+            /* Check if entry point or structure table is above 4GB */
+            uint64_t ep_addr = (uint64_t)(uintptr_t)ep;
+            uint64_t st_addr = ep->structure_table_address;
+
+            if (ep_addr >= 0x100000000ULL || st_addr >= 0x100000000ULL) {
+                printf("  Entry point or structure table above 4GB, relocation needed\n");
+                result_ep = relocate_smbios_21(ep, st_addr, ep->structure_table_length);
+                break;
             }
 #endif
-            table_addr = addr;
+            result_ep = ep;
             break;
         }
     }
 
-    if (table_addr == 0) {
+    /*
+     * If SMBIOS 2.x not found/usable, try SMBIOS 3.0.
+     * We synthesize an SMBIOS 2.x entry point from the 3.0 data since
+     * SeaBIOS and legacy operating systems only understand 2.x format.
+     */
+    if (!result_ep) {
         for (size_t i = 0; i < gST->NumberOfTableEntries; i++) {
             EFI_CONFIGURATION_TABLE *table = gST->ConfigurationTable + i;
 
             if (!efi_guidcmp(table->VendorGuid, smbios3Guid)) {
-                uintptr_t addr = (uintptr_t)table->VendorTable;
-                printf("Found SMBIOS 3.0 Table at %x\n", addr);
-#ifdef __x86_64__
-                /* Skip tables above 4GB - unusable by 32-bit legacy BIOS */
-                if (addr >= 0x100000000ULL) {
-                    break;
+                struct smbios_30_entry_point *ep = table->VendorTable;
+                printf("Found SMBIOS 3.0 entry point at %p\n", (void *)ep);
+
+                /* Validate signature */
+                if (memcmp(ep->signature, "_SM3_", 5) != 0) {
+                    printf("  Invalid signature, skipping\n");
+                    continue;
                 }
-#endif
-                table_addr = addr;
+
+                /* Validate checksum */
+                if (smbios_checksum(ep, ep->length) != 0) {
+                    printf("  Invalid checksum, skipping\n");
+                    continue;
+                }
+
+                printf("  Version: %u.%u, structure table at %lx, max size %u\n",
+                       ep->smbios_major_version, ep->smbios_minor_version,
+                       (unsigned long)ep->structure_table_address,
+                       ep->structure_table_max_size);
+
+                /* Synthesize SMBIOS 2.x from 3.0 */
+                result_ep = synthesize_smbios_21_from_30(
+                    ep, ep->structure_table_address, ep->structure_table_max_size);
                 break;
             }
         }
     }
 
-    if (table_addr != 0) {
-        priv.low_stub->boot_table.SmbiosTable = table_addr;
-        return 0;
+    if (!result_ep) {
+        printf("No usable SMBIOS table found\n");
+        return -1;
     }
 
-    printf("No usable SMBIOS table found\n");
-
-    return -1;
+    priv.low_stub->boot_table.SmbiosTable = (uintptr_t)result_ep;
+    priv.low_stub->boot_table.SmbiosTableLength = result_ep->structure_table_length;
+    return 0;
 }
 
 EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
