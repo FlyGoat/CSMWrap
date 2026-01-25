@@ -36,15 +36,46 @@ static EFI_STATUS FindGopPciDevice(struct csmwrap_priv *priv)
         return Status;
     }
 
-    // Iterate through each GOP handle
+    // Iterate through each GOP handle, find one with valid FrameBufferBase
     for (HandleIndex = 0; HandleIndex < HandleCount; HandleIndex++) {
-        // Get the GOP protocol
         Status = gBS->HandleProtocol(
                         HandleBuffer[HandleIndex],
                         &gopGuid,
                         (VOID**)&Gop
                         );
         if (EFI_ERROR(Status)) {
+            continue;
+        }
+
+        // Initialize GOP if not started
+        UINTN currentMode = Gop->Mode == NULL ? 0 : Gop->Mode->Mode;
+        EFI_GRAPHICS_OUTPUT_MODE_INFORMATION *modeInfo;
+        UINTN modeInfoSize;
+
+        Status = Gop->QueryMode(Gop, currentMode, &modeInfoSize, &modeInfo);
+        if (Status == EFI_NOT_STARTED) {
+            Status = Gop->SetMode(Gop, 0);
+            if (EFI_ERROR(Status)) {
+                continue;
+            }
+        }
+
+        // Try all modes to find one with valid FrameBufferBase
+        UINTN maxMode = Gop->Mode->MaxMode;
+        bool found = false;
+        for (UINTN mode = 0; mode < maxMode; mode++) {
+            Status = Gop->SetMode(Gop, mode);
+            if (EFI_ERROR(Status)) {
+                continue;
+            }
+
+            if (Gop->Mode->FrameBufferBase != 0) {
+                found = true;
+                break;
+            }
+        }
+
+        if (!found) {
             continue;
         }
 
@@ -413,12 +444,10 @@ static EFI_STATUS csmwrap_video_seavgabios_init(struct csmwrap_priv *priv)
         return EFI_UNSUPPORTED;
     }
 
-    /* FIXME: What if it's not a VBE mode? */
-    currentMode = gop->Mode ? gop->Mode->Mode : 0;
-
-    /* we got the interface, get current mode */
+    /* Mode already set by FindGopPciDevice, just query info */
+    currentMode = gop->Mode->Mode;
     status = gop->QueryMode(gop, currentMode, &isiz, &info);
-    if(EFI_ERROR(status)) {
+    if (EFI_ERROR(status)) {
         printf("unable to get current video mode\n");
         return -1;
     }
