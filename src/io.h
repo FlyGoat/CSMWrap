@@ -3,11 +3,24 @@
 
 #include <efi.h>
 #include <printf.h>
+#include <stdbool.h>
 
 #define barrier() __asm__ __volatile__("": : :"memory")
 
+// Check CPUID.01H:EDX[19] for CLFLUSH support
+static inline bool cpu_has_clflush(void) {
+    uint32_t eax, ebx, ecx, edx;
+    asm volatile ("cpuid" : "=a"(eax), "=b"(ebx), "=c"(ecx), "=d"(edx) : "a"(1) : "memory");
+    return (edx >> 19) & 1;
+}
+
 static inline void clflush(void *addr) {
-    asm volatile ("clflush (%0)" :: "r"(addr) : "memory");
+    if (cpu_has_clflush()) {
+        asm volatile ("clflush (%0)" :: "r"(addr) : "memory");
+    } else {
+        // Fall back to wbinvd (flushes entire cache, requires ring 0)
+        asm volatile ("wbinvd" ::: "memory");
+    }
 }
 
 static inline void writel(void *addr, uint32_t val) {
