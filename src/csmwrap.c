@@ -59,10 +59,15 @@ int set_smbios_table()
         EFI_CONFIGURATION_TABLE *table = gST->ConfigurationTable + i;
 
         if (!efi_guidcmp(table->VendorGuid, smbiosGuid)) {
-            printf("Found SMBIOS Table at %x\n", (uintptr_t)table->VendorTable);
-            if (table_addr < 0x100000000) {
-                table_addr = (uintptr_t)table->VendorTable;
+            uintptr_t addr = (uintptr_t)table->VendorTable;
+            printf("Found SMBIOS Table at %x\n", addr);
+#ifdef __x86_64__
+            /* Skip tables above 4GB - unusable by 32-bit legacy BIOS */
+            if (addr >= 0x100000000ULL) {
+                break;  /* Try SMBIOS 3.0 instead */
             }
+#endif
+            table_addr = addr;
             break;
         }
     }
@@ -72,10 +77,15 @@ int set_smbios_table()
             EFI_CONFIGURATION_TABLE *table = gST->ConfigurationTable + i;
 
             if (!efi_guidcmp(table->VendorGuid, smbios3Guid)) {
-                printf("Found SMBIOS 3.0 Table at %x\n", (uintptr_t)table->VendorTable);
-                if (table_addr < 0x100000000) {
-                    table_addr = (uintptr_t)table->VendorTable;
+                uintptr_t addr = (uintptr_t)table->VendorTable;
+                printf("Found SMBIOS 3.0 Table at %x\n", addr);
+#ifdef __x86_64__
+                /* Skip tables above 4GB - unusable by 32-bit legacy BIOS */
+                if (addr >= 0x100000000ULL) {
+                    break;
                 }
+#endif
+                table_addr = addr;
                 break;
             }
         }
