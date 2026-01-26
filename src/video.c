@@ -154,6 +154,9 @@ static EFI_STATUS FindGopPciDevice(struct csmwrap_priv *priv)
                                 );
 
 
+        priv->vga_vendor_id = VendorId;
+        priv->vga_device_id = DeviceId;
+
         printf("GOP PCI: %04x:%02x:%02x.%02x %04x:%04x\n",
                     Seg, (UINT8)Bus, (UINT8)Device, (UINT8)Function,
                     VendorId, DeviceId);
@@ -593,6 +596,77 @@ EFI_STATUS csmwrap_video_prepare_exitbs(struct csmwrap_priv *priv)
     return EFI_SUCCESS;
 }
 
+/*
+ * Check if the GPU is AMD RDNA or newer architecture.
+ *
+ * AMD RDNA+ iGPUs have broken/non-functional legacy VGA BIOS (OpROM),
+ * so we need to force SeaVGABIOS even if the GPU advertises an OpROM.
+ *
+ * Strategy: Instead of listing all RDNA+ device IDs (which requires constant
+ * updates), we whitelist known-good pre-RDNA (Vega-based) APUs and assume
+ * any other AMD iGPU in the typical APU device ID ranges is RDNA+.
+ *
+ * Device IDs sourced from Linux amdgpu driver and Folding@home GPU database.
+ */
+#define AMD_VENDOR_ID 0x1002
+
+static bool is_amd_vega_apu(uint16_t device_id)
+{
+    /*
+     * Known Vega-based APUs with working legacy OpROM:
+     * - Raven Ridge (Ryzen 2000 APU)
+     * - Picasso (Ryzen 3000 APU)
+     * - Renoir (Ryzen 4000 APU)
+     * - Lucienne (Ryzen 5000 APU, Zen 2 refresh)
+     * - Cezanne (Ryzen 5000 APU, Zen 3)
+     * - Barcelo (Ryzen 5000 APU refresh)
+     */
+    switch (device_id) {
+    case 0x15D8:  /* Picasso */
+    case 0x15DD:  /* Raven Ridge */
+    case 0x15E7:  /* Barcelo */
+    case 0x1636:  /* Renoir */
+    case 0x1638:  /* Renoir/Cezanne */
+    case 0x164C:  /* Lucienne */
+        return true;
+    default:
+        return false;
+    }
+}
+
+static bool is_amd_rdna_or_newer(uint16_t vendor_id, uint16_t device_id)
+{
+    if (vendor_id != AMD_VENDOR_ID)
+        return false;
+
+    /*
+     * AMD RDNA 1/2/3/4 discrete GPUs (Navi series):
+     * - 0x73xx: Navi 10/12/14 (RDNA 1), Navi 21/22/23 (RDNA 2)
+     * - 0x74xx: Navi 24 (RDNA 2), Navi 31/32/33 (RDNA 3)
+     */
+    if ((device_id & 0xFF00) == 0x7300 ||
+        (device_id & 0xFF00) == 0x7400)
+        return true;
+
+    /*
+     * AMD APU/iGPU detection:
+     * Device IDs in ranges 0x14xx, 0x15xx, 0x16xx, 0x19xx are typically iGPUs.
+     * If it's not a known Vega APU, assume it's RDNA+ with broken OpROM.
+     */
+    if ((device_id & 0xFF00) == 0x1400 ||
+        (device_id & 0xFF00) == 0x1500 ||
+        (device_id & 0xFF00) == 0x1600 ||
+        (device_id & 0xFF00) == 0x1900) {
+        /* Check if it's a known-good Vega APU */
+        if (is_amd_vega_apu(device_id))
+            return false;
+        /* Unknown APU in these ranges - assume RDNA+ */
+        return true;
+    }
+
+    return false;
+}
+
 EFI_STATUS csmwrap_video_init(struct csmwrap_priv *priv)
 {
     EFI_STATUS status;
@@ -613,9 +687,22 @@ EFI_STATUS csmwrap_video_init(struct csmwrap_priv *priv)
         return 0;
     }
 
-    status = csmwrap_video_oprom_init(priv);
-    if (status == EFI_SUCCESS) {
-        return 0;
+    /*
+     * AMD RDNA+ iGPUs have broken legacy OpROMs that don't work properly
+     * with SeaBIOS. Force SeaVGABIOS for these GPUs even if an OpROM exists.
+     */
+    bool force_seavgabios = is_amd_rdna_or_newer(priv->vga_vendor_id,
+                                                  priv->vga_device_id);
+    if (force_seavgabios) {
+        printf("AMD RDNA+ GPU detected (device %04x), forcing SeaVGABIOS\n",
+               priv->vga_device_id);
+    }
+
+    if (!force_seavgabios) {
+        status = csmwrap_video_oprom_init(priv);
+        if (status == EFI_SUCCESS) {
+            return 0;
+        }
     }
 
     status = csmwrap_video_seavgabios_init(priv);

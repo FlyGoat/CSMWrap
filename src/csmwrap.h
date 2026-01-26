@@ -36,6 +36,8 @@ struct csmwrap_priv {
     EFI_PCI_IO_PROTOCOL *vga_pci_io;
     uint8_t vga_pci_bus;
     uint8_t vga_pci_devfn;
+    uint16_t vga_vendor_id;
+    uint16_t vga_device_id;
     struct cb_framebuffer cb_fb;
 };
 
