@@ -1,3 +1,4 @@
+#include <stddef.h>
 #include <stdarg.h>
 #include <stddef.h>
 #include <stdbool.h>
@@ -15,6 +16,10 @@
 #include <efi.h>
 #include <csmwrap.h>
 #include <io.h>
+#include <flanterm.h>
+#include <flanterm_backends/fb.h>
+
+struct flanterm_context *flanterm_ctx = NULL;
 
 #define SERIAL_DEBUG_ENABLED 0
 
@@ -27,6 +32,10 @@ static void _putchar(int character, void *extra_arg) {
 
     if (character == '\n') {
         _putchar('\r', NULL);
+    }
+
+    if (flanterm_ctx != NULL) {
+        flanterm_write(flanterm_ctx, (const char *)&character, 1);
     }
 
     if (!gST->ConOut || !gST->ConOut->OutputString) {
@@ -55,12 +64,6 @@ static void _putchar(int character, void *extra_arg) {
 
         return;
     }
-
-    CHAR16 string[2];
-    string[0] = character;
-    string[1] = 0;
-
-    gST->ConOut->OutputString(gST->ConOut, string);
 }
 
 int printf(const char *restrict fmt, ...) {

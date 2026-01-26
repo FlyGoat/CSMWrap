@@ -16,3 +16,6 @@
 [submodule "uACPI"]
 	path = uACPI
 	url = https://github.com/uACPI/uACPI.git
+[submodule "flanterm"]
+	path = flanterm
+	url = https://codeberg.org/Mintsuki/Flanterm.git

@@ -642,6 +642,21 @@ static bool is_amd_rdna_or_newer(uint16_t vendor_id, uint16_t device_id)
     return false;
 }
 
+void csmwrap_video_early_init(struct csmwrap_priv *priv) {
+    if (FindGopPciDevice(priv) != EFI_SUCCESS) {
+        priv->cb_fb.physical_address = 0;
+        return;
+    }
+
+    if (csmwrap_video_seavgabios_init(priv) != EFI_SUCCESS) {
+        priv->cb_fb.physical_address = 0;
+        return;
+    }
+
+    /* Clear vbios_loc so csmwrap_video_init() doesn't skip OpROM init */
+    vbios_loc = NULL;
+}
+
 EFI_STATUS csmwrap_video_init(struct csmwrap_priv *priv)
 {
     EFI_STATUS status;

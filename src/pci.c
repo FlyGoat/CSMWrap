@@ -1,8 +1,13 @@
+#define FLANTERM_IN_FLANTERM
+
 #include <csmwrap.h>
 #include <io.h>
 #include <pci.h>
 #include <printf.h>
 #include <qsort.h>
+#include <flanterm_backends/fb.h>
+
+extern struct flanterm_context *flanterm_ctx;
 
 #include <uacpi/acpi.h>
 #include <uacpi/namespace.h>
@@ -317,8 +322,6 @@ static void sort_bars(struct pci_bus *bus) {
 
 static void reallocate_bars(struct pci_bus *bus);
 
-static bool framebuffer_relocated = false;
-
 static void reallocate_single_bar(struct pci_bus *bus, struct pci_bar *bar) {
     bool tried_all_prefetchable = false;
 
@@ -376,8 +379,7 @@ again:
                bar->bar_number, bus->segment, bus->bus, bar->device->slot, bar->device->function,
                orig_base, bar->base);
 
-        if (framebuffer_relocated == false
-         && bar->bar_number != 0xff
+        if (bar->bar_number != 0xff
          && priv.cb_fb.physical_address >= orig_base
          && priv.cb_fb.physical_address < orig_base + bar->length) {
             printf("BAR contains the EFI framebuffer. Modifying cb_fb.physical_address accordingly...\n");
@@ -385,7 +387,6 @@ again:
             priv.cb_fb.physical_address -= orig_base;
             priv.cb_fb.physical_address += bar->base;
             printf("0x%llx\n", priv.cb_fb.physical_address);
-            framebuffer_relocated = true;
         }
 
         // Disable memory decode while updating BAR to prevent device from
@@ -1131,6 +1132,14 @@ bool pci_late_initialize(void) {
         }
     }
 
+    // Save and disable Flanterm during relocation.
+    // When we relocate bridge windows, the address range the bridge forwards changes,
+    // so accessing the framebuffer at the old address will fail even before we
+    // relocate the VGA BAR itself. Disabling Flanterm prevents crashes during this phase.
+    uint64_t old_fb_addr = priv.cb_fb.physical_address;
+    struct flanterm_context *saved_flanterm_ctx = flanterm_ctx;
+    flanterm_ctx = NULL;
+
     for (size_t i = 0; i < root_bus_count; i++) {
         struct pci_bus *bus = root_buses[i];
 
@@ -1152,6 +1161,15 @@ bool pci_late_initialize(void) {
         printf("---------------\n");
         pretty_print_bus(bus, 0);
     }
+
+    // Update Flanterm's framebuffer pointer if it was relocated
+    if (saved_flanterm_ctx != NULL && priv.cb_fb.physical_address != old_fb_addr) {
+        ((struct flanterm_fb_context *)saved_flanterm_ctx)->framebuffer =
+            (void *)(uintptr_t)priv.cb_fb.physical_address;
+    }
+
+    // Re-enable Flanterm
+    flanterm_ctx = saved_flanterm_ctx;
 
     if (priv.cb_fb.physical_address >= 0x100000000ULL) {
         printf("FATAL: Framebuffer at 0x%llx is above 4GB and could not be relocated\n",
