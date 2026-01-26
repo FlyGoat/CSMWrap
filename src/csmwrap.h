@@ -19,7 +19,6 @@ enum csmwrap_video_type {
     CSMWRAP_VIDEO_NONE,
     CSMWRAP_VIDEO_OPROM,
     CSMWRAP_VIDEO_SEAVGABIOS,
-    CSMWRAP_VIDEO_FALLBACK,
 };
 
 struct csmwrap_priv {

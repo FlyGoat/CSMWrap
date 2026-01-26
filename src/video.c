@@ -537,34 +537,6 @@ static EFI_STATUS csmwrap_video_seavgabios_init(struct csmwrap_priv *priv)
 
 }
 
-static EFI_STATUS csmwrap_video_fallback(struct csmwrap_priv *priv)
-{
-    struct cb_framebuffer *cb_fb = &priv->cb_fb;
-
-    cb_fb->physical_address = 0x000A0000;
-    cb_fb->x_resolution = 1024;
-    cb_fb->y_resolution = 768;
-    cb_fb->bytes_per_line = 1024 * 4;
-    cb_fb->bits_per_pixel = 32;
-    cb_fb->red_mask_pos = 0;
-    cb_fb->red_mask_size = 8;
-    cb_fb->green_mask_pos = 8;
-    cb_fb->green_mask_size = 8;
-    cb_fb->blue_mask_pos = 16;
-    cb_fb->blue_mask_size = 8;
-    cb_fb->reserved_mask_pos = 24;
-    cb_fb->reserved_mask_size = 8;
-
-    vbios_loc = vgabios_bin;
-    vbios_size = sizeof(vgabios_bin);
-
-    priv->video_type = CSMWRAP_VIDEO_FALLBACK;
-
-    printf("WARNING: Using fallback Video, you wont't be able to get display!\n");
-
-    return 0;
-}
-
 EFI_STATUS csmwrap_video_prepare_exitbs(struct csmwrap_priv *priv)
 {
     /*
@@ -708,11 +680,9 @@ EFI_STATUS csmwrap_video_init(struct csmwrap_priv *priv)
         return 0;
     }
 
-    status = csmwrap_video_fallback(priv);
-    if (status == EFI_SUCCESS) {
-        return 0;
-    }
-
-    return EFI_UNSUPPORTED;
+    printf("FATAL: No video initialization method available!\n");
+    printf("       Neither OpROM nor SeaVGABIOS could be initialized.\n");
+    for (;;)
+        asm volatile ("hlt");
 }
 
