@@ -9,21 +9,21 @@
 void *vbios_loc = NULL;
 uintptr_t vbios_size;
 
-static EFI_STATUS FindGopPciDevice(struct csmwrap_priv *priv)
+/* Forward declaration */
+static bool is_amd_rdna_or_newer(uint16_t vendor_id, uint16_t device_id);
+
+/*
+ * Find a GOP with a valid framebuffer and set its mode.
+ * This is needed for Flanterm and SeaVGABIOS framebuffer access.
+ */
+static EFI_STATUS FindGop(struct csmwrap_priv *priv)
 {
-    EFI_STATUS                   Status = EFI_SUCCESS;
-    EFI_HANDLE                   *HandleBuffer;
-    EFI_HANDLE                   Handle;
-    UINTN                        HandleCount;
-    UINTN                        HandleIndex;
+    EFI_STATUS Status;
+    EFI_HANDLE *HandleBuffer;
+    UINTN HandleCount;
     EFI_GUID gopGuid = EFI_GRAPHICS_OUTPUT_PROTOCOL_GUID;
-    EFI_GUID DevicePathGuid = EFI_DEVICE_PATH_PROTOCOL_GUID;
-    EFI_GUID PciIoGuid = EFI_PCI_IO_PROTOCOL_GUID;
-    EFI_DEVICE_PATH_PROTOCOL *DevicePath;
-    EFI_PCI_IO_PROTOCOL *PciIo;
     EFI_GRAPHICS_OUTPUT_PROTOCOL *Gop;
 
-    // Get all handles that support GOP
     Status = gBS->LocateHandleBuffer(
                     ByProtocol,
                     &gopGuid,
@@ -37,9 +37,9 @@ static EFI_STATUS FindGopPciDevice(struct csmwrap_priv *priv)
     }
 
     // Iterate through each GOP handle, find one with valid FrameBufferBase
-    for (HandleIndex = 0; HandleIndex < HandleCount; HandleIndex++) {
+    for (UINTN i = 0; i < HandleCount; i++) {
         Status = gBS->HandleProtocol(
-                        HandleBuffer[HandleIndex],
+                        HandleBuffer[i],
                         &gopGuid,
                         (VOID**)&Gop
                         );
@@ -80,38 +80,54 @@ static EFI_STATUS FindGopPciDevice(struct csmwrap_priv *priv)
         }
 
         priv->gop = Gop;
-        priv->gop_handle = HandleBuffer[HandleIndex];
+        priv->gop_handle = HandleBuffer[i];
         break;
     }
 
+    gBS->FreePool(HandleBuffer);
+
     if (priv->gop == NULL) {
-        printf("No GOP handle found\n");
-        // Free the handle buffer
-        gBS->FreePool(HandleBuffer);
-        goto Out;
+        printf("No GOP with valid framebuffer found\n");
+        return EFI_NOT_FOUND;
+    }
+
+    return EFI_SUCCESS;
+}
+
+/*
+ * Find PCI device info for the GOP.
+ * This is needed for OpROM loading and VGA arbitration.
+ * May fail on firmware-provided GOPs (e.g., Intel iGPU).
+ */
+static EFI_STATUS FindGopPciInfo(struct csmwrap_priv *priv)
+{
+    EFI_STATUS Status;
+    EFI_HANDLE Handle;
+    EFI_GUID DevicePathGuid = EFI_DEVICE_PATH_PROTOCOL_GUID;
+    EFI_GUID PciIoGuid = EFI_PCI_IO_PROTOCOL_GUID;
+    EFI_DEVICE_PATH_PROTOCOL *DevicePath;
+    EFI_PCI_IO_PROTOCOL *PciIo;
+
+    if (priv->gop_handle == NULL) {
+        return EFI_NOT_FOUND;
     }
 
     Status = gBS->HandleProtocol(
-                    HandleBuffer[HandleIndex],
+                    priv->gop_handle,
                     &DevicePathGuid,
                     (VOID**)&DevicePath
                     );
-    // We are done with previous handle buffer atm
-    gBS->FreePool(HandleBuffer);
     if (EFI_ERROR(Status)) {
-        printf("Failed to get Device Path protocol: %d\n", Status);
-        goto Out;
+        return Status;
     }
 
     Status = gBS->LocateDevicePath(
-        &PciIoGuid,
-        &DevicePath,
-        &Handle
-        );
-
+                    &PciIoGuid,
+                    &DevicePath,
+                    &Handle
+                    );
     if (EFI_ERROR(Status)) {
-        printf("Failed to locate PCI I/O protocol: %d\n", Status);
-        goto Out;
+        return Status;
     }
 
     Status = gBS->HandleProtocol(
@@ -119,52 +135,31 @@ static EFI_STATUS FindGopPciDevice(struct csmwrap_priv *priv)
                     &PciIoGuid,
                     (VOID**)&PciIo
                     );
-
-    if (!EFI_ERROR(Status)) {
-        UINT16 VendorId, DeviceId;
-        UINTN Seg, Bus, Device, Function;
-
-        priv->vga_pci_io = PciIo;
-
-        Status = PciIo->GetLocation(
-                                    PciIo,
-                                    &Seg,
-                                    &Bus,
-                                    &Device,
-                                    &Function
-                                    );
-
-        priv->vga_pci_bus = (UINT8)Bus;
-        priv->vga_pci_devfn = (UINT8)(Device << 3 | Function);
-
-        Status = PciIo->Pci.Read(
-                                PciIo,
-                                EfiPciIoWidthUint16,
-                                0, // Vendor ID offset
-                                1,
-                                &VendorId
-                                );
-
-        Status = PciIo->Pci.Read(
-                                PciIo,
-                                EfiPciIoWidthUint16,
-                                2, // Device ID offset
-                                1,
-                                &DeviceId
-                                );
-
-
-        priv->vga_vendor_id = VendorId;
-        priv->vga_device_id = DeviceId;
-
-        printf("GOP PCI: %04x:%02x:%02x.%02x %04x:%04x\n",
-                    Seg, (UINT8)Bus, (UINT8)Device, (UINT8)Function,
-                    VendorId, DeviceId);
-    } else {
-        printf("Failed to get PCI I/O protocol: %d\n", Status);
+    if (EFI_ERROR(Status)) {
+        return Status;
     }
-Out:
-  return Status;
+
+    UINT16 VendorId, DeviceId;
+    UINTN Seg, Bus, Device, Function;
+
+    priv->vga_pci_io = PciIo;
+
+    PciIo->GetLocation(PciIo, &Seg, &Bus, &Device, &Function);
+
+    priv->vga_pci_bus = (UINT8)Bus;
+    priv->vga_pci_devfn = (UINT8)(Device << 3 | Function);
+
+    PciIo->Pci.Read(PciIo, EfiPciIoWidthUint16, 0, 1, &VendorId);
+    PciIo->Pci.Read(PciIo, EfiPciIoWidthUint16, 2, 1, &DeviceId);
+
+    priv->vga_vendor_id = VendorId;
+    priv->vga_device_id = DeviceId;
+
+    printf("GOP PCI: %04x:%02x:%02x.%02x %04x:%04x\n",
+                Seg, (UINT8)Bus, (UINT8)Device, (UINT8)Function,
+                VendorId, DeviceId);
+
+    return EFI_SUCCESS;
 }
 
 static EFI_STATUS
@@ -388,12 +383,25 @@ static EFI_STATUS csmwrap_video_oprom_init(struct csmwrap_priv *priv)
 {
     EFI_STATUS Status;
     PCI_TYPE00 PciConfigHeader;
-    EFI_PCI_IO_PROTOCOL *PciIo = priv->vga_pci_io;
+    EFI_PCI_IO_PROTOCOL *PciIo;
     UINTN  LocalRomSize;
     VOID  *LocalRomImage;
 
+    /* Find PCI device info - required for OpROM */
+    FindGopPciInfo(priv);
+
+    PciIo = priv->vga_pci_io;
     if (!PciIo || !PciIo->RomImage || !PciIo->RomSize) {
-        DEBUG((DEBUG_ERROR, No PCI I/O protocol or RomImage function\n));
+        return EFI_UNSUPPORTED;
+    }
+
+    /*
+     * AMD RDNA+ iGPUs have broken legacy OpROMs that don't work properly
+     * with SeaBIOS. Force SeaVGABIOS for these GPUs.
+     */
+    if (is_amd_rdna_or_newer(priv->vga_vendor_id, priv->vga_device_id)) {
+        printf("AMD RDNA+ GPU detected (device %04x), skipping OpROM\n",
+               priv->vga_device_id);
         return EFI_UNSUPPORTED;
     }
 
@@ -643,7 +651,7 @@ static bool is_amd_rdna_or_newer(uint16_t vendor_id, uint16_t device_id)
 }
 
 void csmwrap_video_early_init(struct csmwrap_priv *priv) {
-    if (FindGopPciDevice(priv) != EFI_SUCCESS) {
+    if (FindGop(priv) != EFI_SUCCESS) {
         priv->cb_fb.physical_address = 0;
         return;
     }
@@ -661,33 +669,23 @@ EFI_STATUS csmwrap_video_init(struct csmwrap_priv *priv)
 {
     EFI_STATUS status;
 
-    status = FindGopPciDevice(priv);
-
-    if (EFI_ERROR(status) && !priv->gop) {
-        printf("Unable to get GOP service\n");
-        return -1;
+    /* Find GOP if not already found by early init */
+    if (!priv->gop) {
+        status = FindGop(priv);
+        if (EFI_ERROR(status)) {
+            printf("Unable to get GOP service\n");
+            return -1;
+        }
     }
 
     if (vbios_loc != NULL) {
         return 0;
     }
 
-    /*
-     * AMD RDNA+ iGPUs have broken legacy OpROMs that don't work properly
-     * with SeaBIOS. Force SeaVGABIOS for these GPUs even if an OpROM exists.
-     */
-    bool force_seavgabios = is_amd_rdna_or_newer(priv->vga_vendor_id,
-                                                  priv->vga_device_id);
-    if (force_seavgabios) {
-        printf("AMD RDNA+ GPU detected (device %04x), forcing SeaVGABIOS\n",
-               priv->vga_device_id);
-    }
-
-    if (!force_seavgabios) {
-        status = csmwrap_video_oprom_init(priv);
-        if (status == EFI_SUCCESS) {
-            return 0;
-        }
+    /* Try OpROM first (will fail if no PCI info or AMD RDNA+) */
+    status = csmwrap_video_oprom_init(priv);
+    if (status == EFI_SUCCESS) {
+        return 0;
     }
 
     status = csmwrap_video_seavgabios_init(priv);
