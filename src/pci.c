@@ -277,6 +277,19 @@ static bool drop_bar(struct pci_bus *bus, struct pci_bar *bar) {
     return true;
 }
 
+// Check if firmware placed this address within a prefetchable range.
+// This is used to determine if a non-prefetchable BAR can safely be
+// relocated to a prefetchable range (firmware already deemed it safe).
+static bool is_address_in_prefetchable_range(struct pci_bus *bus, uint64_t address) {
+    for (size_t i = 0; i < bus->range_count; i++) {
+        struct pci_range *range = &bus->ranges[i];
+        if (address >= range->base && address < range->base + range->length) {
+            return range->prefetchable;
+        }
+    }
+    return false;
+}
+
 static int compare_bars(const void *a, const void *b) {
     const struct pci_bar *bar_a = *(const struct pci_bar **)a;
     const struct pci_bar *bar_b = *(const struct pci_bar **)b;
@@ -442,7 +455,11 @@ again:
         return;
     }
 
-    if (bar->prefetchable && tried_all_prefetchable == false) {
+    // Allow fallback to mismatched prefetchability if:
+    // 1. BAR is prefetchable (can always use non-prefetchable range safely), or
+    // 2. Firmware originally placed this non-prefetchable BAR in a prefetchable range
+    //    (trusting that firmware knew this device is safe in prefetchable memory)
+    if ((bar->prefetchable || bar->firmware_in_prefetchable) && tried_all_prefetchable == false) {
         tried_all_prefetchable = true;
         goto again;
     }
@@ -518,6 +535,8 @@ static bool scan_bars(struct pci_device *device) {
             bar->device = device;
             bar->prefetchable = false;
             bar->is_64 = false;
+            // Check if firmware placed this non-prefetchable window in a prefetchable region
+            bar->firmware_in_prefetchable = is_address_in_prefetchable_range(device->root_bus, non_prefetchable_base);
 
             add_bar(device->root_bus, bar);
         }
@@ -570,6 +589,8 @@ no_non_prefetch_range:
             bar->device = device;
             bar->prefetchable = true;
             bar->is_64 = is_64;
+            // Check if firmware placed this window in a prefetchable region (should always be true for prefetchable windows)
+            bar->firmware_in_prefetchable = is_address_in_prefetchable_range(device->root_bus, prefetchable_base);
 
             add_bar(device->root_bus, bar);
         }
@@ -655,6 +676,8 @@ no_prefetch_range:
             bar_info->length = length;
             bar_info->prefetchable = prefetchable;
             bar_info->is_64 = is_64bit;
+            // Check if firmware placed this BAR in a prefetchable region
+            bar_info->firmware_in_prefetchable = is_address_in_prefetchable_range(device->root_bus, base);
 
             if (!add_bar(device->root_bus, bar_info)) {
                 printf("add_bar() failure\n");

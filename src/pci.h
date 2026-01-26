@@ -51,6 +51,11 @@ struct pci_bar {
     bool is_64;
     bool prefetchable;
 
+    // If true, firmware originally placed this BAR in a prefetchable region.
+    // This allows non-prefetchable BARs to be relocated to prefetchable ranges
+    // if the firmware deemed it safe for this particular device.
+    bool firmware_in_prefetchable;
+
     // Base address and size of the bar
     uint64_t base;
     uint64_t length;
