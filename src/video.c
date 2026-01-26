@@ -397,6 +397,9 @@ static EFI_STATUS csmwrap_video_oprom_init(struct csmwrap_priv *priv)
         return EFI_UNSUPPORTED;
     }
 
+    /* Enable VGA routing to this device for legacy OpROM execution */
+    csmwrap_pci_vgaarb(priv);
+
     LocalRomSize  = (UINTN) PciIo->RomSize;
     LocalRomImage = PciIo->RomImage;
 
@@ -676,11 +679,6 @@ EFI_STATUS csmwrap_video_init(struct csmwrap_priv *priv)
     if (EFI_ERROR(status) && !priv->gop) {
         printf("Unable to get GOP service\n");
         return -1;
-    }
-
-    if (priv->vga_pci_io) {
-        /* Some boards will fail on this stage, no worries */
-        status = csmwrap_pci_vgaarb(priv);
     }
 
     if (vbios_loc != NULL) {
