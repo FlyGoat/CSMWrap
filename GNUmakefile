@@ -121,6 +121,9 @@ override CPPFLAGS := \
     -MMD \
     -MP
 
+obj-$(ARCH)/flanterm/src/flanterm_backends/fb.c.o: override CPPFLAGS += \
+	-DFLANTERM_FB_DISABLE_BUMP_ALLOC
+
 # Internal nasm flags that should not be changed by the user.
 override NASMFLAGS := \
     $(patsubst -g,-g -F dwarf,$(NASMFLAGS)) \

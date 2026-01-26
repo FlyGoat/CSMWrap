@@ -32,6 +32,27 @@ struct csmwrap_priv priv = {
     .csm_bin = Csm16_bin,
 };
 
+/*
+ * UEFI memory allocation wrappers for Flanterm.
+ * These use EFI Boot Services pool allocation.
+ */
+static void *flanterm_uefi_malloc(size_t size)
+{
+    void *ptr = NULL;
+    if (gBS->AllocatePool(EfiLoaderData, size, &ptr) != EFI_SUCCESS) {
+        return NULL;
+    }
+    return ptr;
+}
+
+static void flanterm_uefi_free(void *ptr, size_t size)
+{
+    (void)size;  /* UEFI FreePool doesn't need size */
+    if (ptr != NULL) {
+        gBS->FreePool(ptr);
+    }
+}
+
 static void *find_table(uint32_t signature, uint8_t *csm_bin_base, size_t size)
 {
     bool Done;
@@ -462,7 +483,7 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
 
     if (priv.cb_fb.physical_address != 0) {
         flanterm_ctx = flanterm_fb_init(
-            NULL, NULL,
+            flanterm_uefi_malloc, flanterm_uefi_free,
             (void *)(uintptr_t)priv.cb_fb.physical_address, priv.cb_fb.x_resolution, priv.cb_fb.y_resolution, priv.cb_fb.bytes_per_line,
             priv.cb_fb.red_mask_size, priv.cb_fb.red_mask_pos, priv.cb_fb.green_mask_size, priv.cb_fb.green_mask_pos, priv.cb_fb.blue_mask_size, priv.cb_fb.blue_mask_pos,
             NULL,
