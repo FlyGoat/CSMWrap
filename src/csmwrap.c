@@ -590,7 +590,7 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
 
     printf("Init Thunk pmm: %lx\n", (uintptr_t)pmm_base);
 
-    priv.low_stub->init_table.BiosLessThan1MB = 0x00080000; // Whole EBDA
+    priv.low_stub->init_table.BiosLessThan1MB = 0; // SeaBIOS does not actually use this field.
     priv.low_stub->init_table.ThunkStart = (uint32_t)(uintptr_t)priv.low_stub;
     priv.low_stub->init_table.ThunkSizeInBytes = sizeof(struct low_stub);
     priv.low_stub->init_table.LowPmmMemory = (uint32_t)pmm_base;

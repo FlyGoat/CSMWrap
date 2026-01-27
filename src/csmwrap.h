@@ -86,8 +86,13 @@ struct low_stub {
 #define CONVEN_START    0x00007E00
 /* We may have some stack here */
 #define LOW_STUB_BASE   0x00020000
-/* Thunk + PMM */
-#define CONVEN_END      0x00080000
+/*
+ * Conventional memory ends at 640KB (0xA0000) - EBDA size.
+ * EBDA is typically 1KB, so conventional memory is 639KB (0x9FC00).
+ * This matches SeaBIOS's BUILD_LOWRAM_END - EBDA_SIZE calculation.
+ * The PMM (Post Memory Manager) area is between low_stub and CONVEN_END.
+ */
+#define CONVEN_END      0x0009FC00
 #define EBDA_BASE       CONVEN_END
 #define VGABIOS_START   0x000C0000
 #define VGABIOS_END     0x000C8000
