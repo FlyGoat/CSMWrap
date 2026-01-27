@@ -717,6 +717,16 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
                         0);
 
     memset(&Regs, 0, sizeof(EFI_IA32_REGISTER_SET));
+    Regs.X.AX = Legacy16UpdateBbs;
+    Regs.X.ES = EFI_SEGMENT(&priv.low_stub->boot_table);
+    Regs.X.BX = EFI_OFFSET(&priv.low_stub->boot_table);
+    LegacyBiosFarCall86(priv.csm_efi_table->Compatibility16CallSegment,
+                        priv.csm_efi_table->Compatibility16CallOffset,
+                        &Regs,
+                        NULL,
+                        0);
+
+    memset(&Regs, 0, sizeof(EFI_IA32_REGISTER_SET));
     Regs.X.AX = Legacy16PrepareToBoot;
     Regs.X.ES = EFI_SEGMENT(&priv.low_stub->boot_table);
     Regs.X.BX = EFI_OFFSET(&priv.low_stub->boot_table);
