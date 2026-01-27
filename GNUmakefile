@@ -17,7 +17,7 @@ ifeq ($(filter $(ARCH),ia32 x86_64),)
 endif
 
 # Default user QEMU flags. These are appended to the QEMU command calls.
-QEMUFLAGS := -m 2G
+QEMUFLAGS := -m 2G -smp 2
 
 # User controllable host C compiler.
 HOST_CC := cc

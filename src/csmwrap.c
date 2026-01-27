@@ -8,6 +8,7 @@
 #include <iommu.h>
 #include <apic.h>
 #include <pci.h>
+#include <bios_proxy.h>
 #include <flanterm.h>
 #include <flanterm_backends/fb.h>
 
@@ -496,8 +497,8 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
 
     printf("%s", banner);
 
-    for (uintptr_t i = 0; i < 0x100000; i += EFI_PAGE_SIZE) {
-        uintptr_t j = i;
+    for (EFI_PHYSICAL_ADDRESS i = 0; i < 0x100000; i += EFI_PAGE_SIZE) {
+        EFI_PHYSICAL_ADDRESS j = i;
         if (gBS->AllocatePages(AllocateAddress, EfiLoaderData, 1, &j) != EFI_SUCCESS) {
             if (i < 0xa0000) {
                 printf("warning: Early AllocatePages() failed for address %p\n", i);
@@ -569,7 +570,17 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
         return -1;
     }
 
+    /* Initialize ACPI first (needed for MADT parsing in bios_proxy_init) */
     acpi_init(&priv);
+
+    /* Calculate RSDP copy location for MADT patching */
+    void *rsdp_copy = priv.csm_bin + (priv.csm_efi_table->AcpiRsdPtrPointer - priv.csm_bin_base);
+
+    /* Initialize BIOS proxy (find mailbox and helper entry in CSM binary) */
+    if (bios_proxy_init(Csm16_bin, sizeof(Csm16_bin), rsdp_copy) != 0) {
+        printf("FATAL: BIOS proxy initialization failed\n");
+        for (;;) { asm volatile ("hlt"); }
+    }
     pci_early_initialize();
 
     Status = csmwrap_video_init(&priv);
@@ -674,6 +685,15 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
     /* Copy ROM to location, as late as possible */
     memcpy((void*)csm_bin_base, Csm16_bin, sizeof(Csm16_bin));
     memcpy((void*)VGABIOS_START, vbios_loc, vbios_size);
+
+    /*
+     * Start the BIOS proxy helper core now that CSM is in its final location.
+     * The helper core will handle BIOS calls when the main core is in V86 mode.
+     */
+    if (bios_proxy_start_helper(csm_bin_base) != 0) {
+        printf("FATAL: Failed to start BIOS proxy helper core\n");
+        for (;;) { asm volatile("hlt"); }
+    }
 
     memset(&Regs, 0, sizeof(EFI_IA32_REGISTER_SET));
     Regs.X.AX = Legacy16InitializeYourself;
