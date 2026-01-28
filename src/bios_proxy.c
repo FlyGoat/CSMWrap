@@ -579,3 +579,12 @@ int bios_proxy_start_helper(uintptr_t csm_final_base)
 
     return -1;
 }
+
+/*
+ * Get the APIC ID of the helper core.
+ * Returns -1 if no helper core has been selected.
+ */
+int bios_proxy_get_helper_apic_id(void)
+{
+    return selected_ap_id;
+}

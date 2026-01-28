@@ -9,6 +9,7 @@
 #include <apic.h>
 #include <pci.h>
 #include <bios_proxy.h>
+#include <mptable.h>
 #include <flanterm.h>
 #include <flanterm_backends/fb.h>
 
@@ -615,6 +616,9 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
 
     /* Build BBS table with boot device prioritized */
     build_bbs_table(&priv, ImageHandle);
+
+    /* Build MP table from ACPI MADT (excludes helper core) */
+    mptable_init(&priv);
 
     printf("CALL16 %x:%x\n", priv.csm_efi_table->Compatibility16CallSegment,
             priv.csm_efi_table->Compatibility16CallOffset);

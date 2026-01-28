@@ -33,4 +33,11 @@ int bios_proxy_init(void *csm_base, size_t csm_size, void *rsdp_copy);
  */
 int bios_proxy_start_helper(uintptr_t csm_final_base);
 
+/*
+ * Get the APIC ID of the helper core.
+ * Returns -1 if no helper core has been selected.
+ * Used by mptable generation to exclude the helper from MP tables.
+ */
+int bios_proxy_get_helper_apic_id(void);
+
 #endif /* _BIOS_PROXY_H */
