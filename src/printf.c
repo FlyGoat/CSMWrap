@@ -21,7 +21,9 @@
 
 struct flanterm_context *flanterm_ctx = NULL;
 
-#define SERIAL_DEBUG_ENABLED 0
+#ifndef SERIAL_DEBUG_ENABLED
+#   define SERIAL_DEBUG_ENABLED 0
+#endif
 
 #if SERIAL_DEBUG_ENABLED == 1
 static bool serial_initialised = false;
@@ -32,10 +34,6 @@ static void _putchar(int character, void *extra_arg) {
 
     if (character == '\n') {
         _putchar('\r', NULL);
-    }
-
-    if (flanterm_ctx != NULL) {
-        flanterm_write(flanterm_ctx, (const char *)&character, 1);
     }
 
     if (!gST->ConOut || !gST->ConOut->OutputString) {
@@ -62,8 +60,23 @@ static void _putchar(int character, void *extra_arg) {
         outb(0x3f8, character);
 #endif
 
+        if (flanterm_ctx != NULL) {
+            static bool flanterm_refreshed = false;
+            if (!flanterm_refreshed) {
+                flanterm_full_refresh(flanterm_ctx);
+                flanterm_refreshed = true;
+            }
+            flanterm_write(flanterm_ctx, (const char *)&character, 1);
+        }
+
         return;
     }
+
+    CHAR16 string[2];
+    string[0] = character;
+    string[1] = 0;
+
+    gST->ConOut->OutputString(gST->ConOut, string);
 }
 
 int printf(const char *restrict fmt, ...) {
