@@ -9,6 +9,27 @@ bits 16
 
 section .rodata
 
+; AMD MTRR MSR addresses
+%define MSR_SYS_CFG                 0xC0010010
+%define SYS_CFG_MTRR_FIX_DRAM_EN    (1 << 18)
+%define SYS_CFG_MTRR_FIX_DRAM_MOD_EN (1 << 19)
+; Fixed MTRRs for conventional memory (0x00000-0x9FFFF)
+%define AMD_MTRR_FIX64k_00000       0x250   ; 0x00000-0x7FFFF (512KB, 8x64KB)
+%define AMD_MTRR_FIX16k_80000       0x258   ; 0x80000-0x9FFFF (128KB, 8x16KB)
+%define AMD_MTRR_FIX16k_A0000       0x259   ; 0xA0000-0xBFFFF (VGA, 128KB, 8x16KB)
+; Fixed MTRRs for BIOS region (0xC0000-0xFFFFF)
+%define AMD_MTRR_FIX4k_C0000        0x268
+%define AMD_MTRR_FIX4k_C8000        0x269
+%define AMD_MTRR_FIX4k_D0000        0x26A
+%define AMD_MTRR_FIX4k_D8000        0x26B
+%define AMD_MTRR_FIX4k_E0000        0x26C
+%define AMD_MTRR_FIX4k_E8000        0x26D
+%define AMD_MTRR_FIX4k_F0000        0x26E
+%define AMD_MTRR_FIX4k_F8000        0x26F
+; WB_DRAM = 0x1E per segment (8 segments per MSR = 0x1E1E1E1E1E1E1E1E)
+%define MTRR_WB_DRAM_LO             0x1E1E1E1E
+%define MTRR_WB_DRAM_HI             0x1E1E1E1E
+
 global ap_trampoline_start
 ap_trampoline_start:
     cli
@@ -18,6 +39,69 @@ ap_trampoline_start:
     xor ax, ax
     mov ds, ax
     mov es, ax
+
+    ; ========================================
+    ; AMD MTRR unlock for low memory (00000-FFFFF)
+    ; Sets conventional memory and BIOS region to WB_DRAM
+    ; Required for helper core to access EBDA and F-segment
+    ; Skipped on Intel (PAM registers are global)
+    ; ========================================
+
+    ; First check if this is AMD by checking CPUID vendor string
+    ; Skip MTRR unlock on Intel (not needed, PAM registers are global)
+    mov eax, 0
+    cpuid
+    cmp ebx, 0x68747541      ; "Auth" (AuthenticAMD)
+    jne .skip_mtrr_unlock
+
+    ; Enable MTRR modification: set SYS_CFG.MtrrFixDramModEn (bit 19)
+    mov ecx, MSR_SYS_CFG
+    rdmsr
+    or eax, SYS_CFG_MTRR_FIX_DRAM_MOD_EN
+    wrmsr
+
+    ; Set conventional memory (00000-9FFFF) to WB_DRAM
+    mov eax, MTRR_WB_DRAM_LO
+    mov edx, MTRR_WB_DRAM_HI
+    mov ecx, AMD_MTRR_FIX64k_00000      ; 0x00000-0x7FFFF
+    wrmsr
+    mov ecx, AMD_MTRR_FIX16k_80000      ; 0x80000-0x9FFFF (includes EBDA)
+    wrmsr
+
+    ; Set VGA region (A0000-BFFFF) to UC (MMIO)
+    xor eax, eax
+    xor edx, edx
+    mov ecx, AMD_MTRR_FIX16k_A0000
+    wrmsr
+
+    ; Set BIOS region (C0000-FFFFF) to WB_DRAM
+    mov eax, MTRR_WB_DRAM_LO
+    mov edx, MTRR_WB_DRAM_HI
+    mov ecx, AMD_MTRR_FIX4k_C0000
+    wrmsr
+    mov ecx, AMD_MTRR_FIX4k_C8000
+    wrmsr
+    mov ecx, AMD_MTRR_FIX4k_D0000
+    wrmsr
+    mov ecx, AMD_MTRR_FIX4k_D8000
+    wrmsr
+    mov ecx, AMD_MTRR_FIX4k_E0000
+    wrmsr
+    mov ecx, AMD_MTRR_FIX4k_E8000
+    wrmsr
+    mov ecx, AMD_MTRR_FIX4k_F0000
+    wrmsr
+    mov ecx, AMD_MTRR_FIX4k_F8000
+    wrmsr
+
+    ; Disable modification, enable fixed MTRR DRAM attributes
+    mov ecx, MSR_SYS_CFG
+    rdmsr
+    and eax, ~SYS_CFG_MTRR_FIX_DRAM_MOD_EN
+    or eax, SYS_CFG_MTRR_FIX_DRAM_EN
+    wrmsr
+
+.skip_mtrr_unlock:
 
     ; Load 32-bit values into registers for SeaBIOS
     ; (16-bit mode can still use 32-bit registers with operand size prefix)
