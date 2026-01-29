@@ -146,6 +146,113 @@ static bool parse_mcfg_table(void) {
     return false;
 }
 
+// ============================================================================
+// PCIe Resizable BAR Support
+// ============================================================================
+
+#define PCI_EXT_CAP_ID_REBAR        0x15    // Resizable BAR capability ID
+
+// Find a PCIe extended capability by ID
+// Returns the offset in config space, or 0 if not found
+static uint16_t pci_find_ext_capability(struct pci_address *address, uint16_t cap_id) {
+    // Extended capabilities start at offset 0x100
+    uint16_t offset = 0x100;
+
+    // Walk the extended capability list
+    for (int i = 0; i < 48 && offset != 0; i++) {  // Max 48 iterations to prevent infinite loop
+        uint32_t header = pci_read32(address, offset);
+
+        // Check for invalid header (all 1s or all 0s)
+        if (header == 0xFFFFFFFF || header == 0) {
+            return 0;
+        }
+
+        uint16_t id = header & 0xFFFF;
+        uint16_t next = (header >> 20) & 0xFFC;  // Next pointer is bits [31:20], 4-byte aligned
+
+        if (id == cap_id) {
+            return offset;
+        }
+
+        offset = next;
+    }
+
+    return 0;
+}
+
+// Try to resize a BAR to fit within max_size bytes
+// Returns the new size if successful, or 0 if resize not possible
+static uint64_t pci_try_resize_bar(struct pci_address *address, uint8_t bar_index, uint64_t max_size) {
+    uint16_t rebar_offset = pci_find_ext_capability(address, PCI_EXT_CAP_ID_REBAR);
+    if (rebar_offset == 0) {
+        return 0;  // No Resizable BAR capability
+    }
+
+    // Read number of resizable BARs from first control register
+    uint32_t ctrl0 = pci_read32(address, rebar_offset + 0x08);
+    uint8_t num_bars = (ctrl0 >> 5) & 0x7;
+
+    if (num_bars == 0) {
+        return 0;
+    }
+
+
+    // Search for the entry corresponding to our BAR
+    for (uint8_t i = 0; i < num_bars; i++) {
+        uint16_t entry_offset = rebar_offset + 0x04 + (i * 8);
+        uint32_t cap = pci_read32(address, entry_offset);
+        uint32_t ctrl = pci_read32(address, entry_offset + 4);
+
+        uint8_t this_bar = ctrl & 0x7;  // BAR index in bits [2:0]
+
+        if (this_bar != bar_index) {
+            continue;
+        }
+
+        // Found the entry for our BAR
+        // Supported sizes are in cap bits [31:4], each bit N represents size 2^(N+20)
+        uint32_t supported_sizes = (cap >> 4) & 0x0FFFFFFF;
+
+
+        // Find the largest size that fits within max_size
+        // Sizes: bit 0 = 1MB (2^20), bit 1 = 2MB (2^21), etc.
+        int best_size_bit = -1;
+        for (int bit = 27; bit >= 0; bit--) {  // Check from largest to smallest
+            if (!(supported_sizes & (1 << bit))) {
+                continue;
+            }
+
+            uint64_t size = 1ULL << (bit + 20);
+            if (size <= max_size) {
+                best_size_bit = bit;
+                break;
+            }
+        }
+
+        if (best_size_bit < 0) {
+            return 0;
+        }
+
+        uint64_t new_size = 1ULL << (best_size_bit + 20);
+
+        // Disable memory decode before resizing
+        uint16_t cmd = pci_read16(address, 0x04);
+        pci_write16(address, 0x04, cmd & ~0x06);  // Clear memory space + bus master
+
+        // Write new size to control register (size in bits [12:8])
+        // Preserve BAR index in bits [2:0]
+        uint32_t new_ctrl = (ctrl & 0x7) | ((best_size_bit & 0x3F) << 8);
+        pci_write32(address, entry_offset + 4, new_ctrl);
+
+        // Re-enable memory decode
+        pci_write16(address, 0x04, cmd);
+
+        return new_size;
+    }
+
+    return 0;
+}
+
 #define ROOT_BUSES_MAX 64
 
 static struct pci_bus *root_buses[ROOT_BUSES_MAX];
@@ -379,8 +486,8 @@ again:
                bar->bar_number, bus->segment, bus->bus, bar->device->slot, bar->device->function,
                orig_base, bar->base);
 
-        if (bar->bar_number != 0xff
-         && priv.cb_fb.physical_address >= orig_base
+        // Update framebuffer address if it falls within this BAR/window
+        if (priv.cb_fb.physical_address >= orig_base
          && priv.cb_fb.physical_address < orig_base + bar->length) {
             printf("BAR contains the EFI framebuffer. Modifying cb_fb.physical_address accordingly...\n");
             printf("  0x%llx => ", priv.cb_fb.physical_address);
@@ -662,6 +769,29 @@ no_prefetch_range:
 
         // Restore command register
         pci_write8(&address, 0x4, cmd);
+
+        // Skip unimplemented BARs (response was 0, which calculates to 4GB or 16EB)
+        if (response == 0 || length == 0) {
+            goto next_bar;
+        }
+
+        // If BAR is larger than the classic 256MB limit, try to resize it
+        // 256MB was the standard GPU framebuffer BAR size before Resizable BAR
+        if (length > 256 * 1024 * 1024) {
+            uint64_t max_resize = 256 * 1024 * 1024;  // 256 MB - classic pre-ReBAR size
+
+            uint64_t new_length = pci_try_resize_bar(&address, bar, max_resize);
+
+            if (new_length > 0 && new_length < length) {
+                printf("Resized BAR%d from %llu MB to %llu MB\n", bar,
+                       length / (1024 * 1024), new_length / (1024 * 1024));
+                length = new_length;
+            } else {
+                printf("BAR%d too large (%llu MB) and resize failed, skipping\n",
+                       bar, length / (1024 * 1024));
+                goto next_bar;
+            }
+        }
 
         if (base != 0) {
             struct pci_bar *bar_info = allocate_bar();
