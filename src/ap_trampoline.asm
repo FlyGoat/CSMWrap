@@ -39,21 +39,41 @@ ap_trampoline_start:
     xor ax, ax
     mov ds, ax
     mov es, ax
+    mov ss, ax
+    jmp far 0x0000:(0x7000 + .reload_cs - ap_trampoline_start)
+.reload_cs:
 
     ; ========================================
     ; AMD MTRR unlock for low memory (00000-FFFFF)
     ; Sets conventional memory and BIOS region to WB_DRAM
     ; Required for helper core to access EBDA and F-segment
-    ; Skipped on Intel (PAM registers are global)
+    ; Skipped on Intel (PAM registers are global, already unlocked by BSP)
+    ; Skipped if region is already writable (e.g., under hypervisors)
     ; ========================================
 
-    ; First check if this is AMD by checking CPUID vendor string
-    ; Skip MTRR unlock on Intel (not needed, PAM registers are global)
+    ; First test if the BIOS region is already writable
+    ; Try writing a test pattern to 0xF0000 and reading it back
+    ; Use segmentation: 0xF000:0x0000 = linear 0xF0000
+    ; Save and restore original value to avoid corrupting CSM code
+    mov ax, 0xF000
+    mov fs, ax
+    mov eax, [fs:0]           ; save original value
+    mov ebx, eax
+    xor eax, 0xFFFFFFFF       ; flip all bits to create test pattern
+    mov [fs:0], eax           ; try to write
+    cmp [fs:0], eax           ; did the write succeed?
+    mov [fs:0], ebx           ; restore original (regardless of result)
+    je .skip_mtrr_unlock      ; Region already writable, skip MTRR unlock
+
+    ; Region not writable - check if this is AMD
+    ; On Intel, PAM registers are global so BSP unlock applies to all cores
+    ; If we get here on Intel, something is wrong - halt
     mov eax, 0
     cpuid
     cmp ebx, 0x68747541      ; "Auth" (AuthenticAMD)
-    jne .skip_mtrr_unlock
+    jne .unlock_failed        ; Not AMD and not writable - halt
 
+    ; AMD system with locked region - attempt MTRR unlock
     ; Enable MTRR modification: set SYS_CFG.MtrrFixDramModEn (bit 19)
     mov ecx, MSR_SYS_CFG
     rdmsr
@@ -101,7 +121,27 @@ ap_trampoline_start:
     or eax, SYS_CFG_MTRR_FIX_DRAM_EN
     wrmsr
 
+    ; Verify the unlock worked by testing write again
+    ; FS still points to 0xF000 from earlier
+    ; Save and restore original value to avoid corrupting CSM code
+    mov eax, [fs:0]           ; save original value
+    mov ebx, eax
+    xor eax, 0xFFFFFFFF       ; flip all bits to create test pattern
+    mov [fs:0], eax           ; try to write
+    cmp [fs:0], eax           ; did the write succeed?
+    mov [fs:0], ebx           ; restore original (regardless of result)
+    jne .unlock_failed        ; MTRR unlock didn't help - halt
+
 .skip_mtrr_unlock:
+    ; Continue to load registers and jump to SeaBIOS
+    jmp .continue_boot
+
+.unlock_failed:
+    ; Region still not writable - halt so BSP detects timeout
+    hlt
+    jmp .unlock_failed
+
+.continue_boot:
 
     ; Load 32-bit values into registers for SeaBIOS
     ; (16-bit mode can still use 32-bit registers with operand size prefix)
