@@ -684,8 +684,6 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
     outb(0x40, 0x00);
     outb(0x40, 0x00);
 
-    flanterm_ctx = NULL;
-
     /* Copy ROM to location, as late as possible */
     memcpy((void*)csm_bin_base, Csm16_bin, sizeof(Csm16_bin));
     memcpy((void*)VGABIOS_START, vbios_loc, vbios_size);
@@ -698,6 +696,9 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
         printf("FATAL: Failed to start BIOS proxy helper core\n");
         for (;;) { asm volatile("hlt"); }
     }
+
+    /* Disable flanterm after last potential panic point - SeaBIOS will take over video */
+    flanterm_ctx = NULL;
 
     memset(&Regs, 0, sizeof(EFI_IA32_REGISTER_SET));
     Regs.X.AX = Legacy16InitializeYourself;
