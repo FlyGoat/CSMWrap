@@ -40,7 +40,7 @@ ap_trampoline_start:
     mov ds, ax
     mov es, ax
     mov ss, ax
-    jmp far 0x0000:(0x7000 + .reload_cs - ap_trampoline_start)
+    jmp 0x0000:word (0x7000 + .reload_cs - ap_trampoline_start)
 .reload_cs:
 
     ; ========================================
