@@ -57,10 +57,14 @@ static inline void *ecam_address(struct ecam_region *region, struct pci_address 
 }
 
 static uint32_t pci_read_pio(struct pci_address *address, uint32_t offset) {
+    if (offset >= 0x100)
+        return 0xFFFFFFFF;
     return pciConfigReadDWord(address->bus, address->slot, address->function, offset);
 }
 
 static void pci_write_pio(struct pci_address *address, uint32_t offset, uint32_t value) {
+    if (offset >= 0x100)
+        return;
     pciConfigWriteDWord(address->bus, address->slot, address->function, offset, value);
 }
 
