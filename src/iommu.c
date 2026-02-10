@@ -52,6 +52,8 @@ struct dmar_drhd {
 #define VTD_GSTS_REG    0x1C
 
 #define VTD_GCMD_TE     (1U << 31)
+#define VTD_GCMD_IRE    (1U << 25)
+#define VTD_GCMD_QIE    (1U << 26)
 #define VTD_GSTS_TES    (1U << 31)
 #define VTD_GSTS_IRES   (1U << 25)
 #define VTD_GSTS_QIES   (1U << 26)
@@ -118,30 +120,69 @@ static bool vtd_disable_unit(uint64_t reg_base) {
            !!(gsts & VTD_GSTS_IRES),
            !!(gsts & VTD_GSTS_QIES));
 
-    if (!(gsts & VTD_GSTS_TES)) {
-        printf("    Translation already disabled\n");
+    if (!(gsts & (VTD_GSTS_TES | VTD_GSTS_IRES | VTD_GSTS_QIES))) {
+        printf("    Already fully disabled\n");
         return true;
     }
 
-    /* Build GCMD: preserve status bits, clear one-shot bits and TE */
-    gcmd = gsts & VTD_GSTS_ONESHOT_MASK;
-    gcmd &= ~VTD_GCMD_TE;
+    /* Disable translation (TE) */
+    if (gsts & VTD_GSTS_TES) {
+        gcmd = gsts & VTD_GSTS_ONESHOT_MASK;
+        gcmd &= ~VTD_GCMD_TE;
+        writel(base + VTD_GCMD_REG, gcmd);
 
-    printf("    Disabling translation (GCMD=0x%08x)\n", gcmd);
-    writel(base + VTD_GCMD_REG, gcmd);
-
-    /* Wait for TES to clear */
-    timeout = VTD_TIMEOUT;
-    while (timeout-- > 0) {
-        gsts = readl(base + VTD_GSTS_REG);
-        if (!(gsts & VTD_GSTS_TES)) {
-            printf("    Translation disabled successfully\n");
-            return true;
+        timeout = VTD_TIMEOUT;
+        while (timeout-- > 0) {
+            gsts = readl(base + VTD_GSTS_REG);
+            if (!(gsts & VTD_GSTS_TES))
+                break;
         }
+        if (gsts & VTD_GSTS_TES) {
+            printf("    WARNING: Timeout disabling translation\n");
+            return false;
+        }
+        printf("    Translation disabled\n");
     }
 
-    printf("    WARNING: Timeout waiting for translation to disable\n");
-    return false;
+    /* Disable interrupt remapping (IRE) */
+    if (gsts & VTD_GSTS_IRES) {
+        gcmd = gsts & VTD_GSTS_ONESHOT_MASK;
+        gcmd &= ~(VTD_GCMD_TE | VTD_GCMD_IRE);
+        writel(base + VTD_GCMD_REG, gcmd);
+
+        timeout = VTD_TIMEOUT;
+        while (timeout-- > 0) {
+            gsts = readl(base + VTD_GSTS_REG);
+            if (!(gsts & VTD_GSTS_IRES))
+                break;
+        }
+        if (gsts & VTD_GSTS_IRES) {
+            printf("    WARNING: Timeout disabling interrupt remapping\n");
+            return false;
+        }
+        printf("    Interrupt remapping disabled\n");
+    }
+
+    /* Disable queued invalidation (QIE) - must be after TE and IRE */
+    if (gsts & VTD_GSTS_QIES) {
+        gcmd = gsts & VTD_GSTS_ONESHOT_MASK;
+        gcmd &= ~(VTD_GCMD_TE | VTD_GCMD_IRE | VTD_GCMD_QIE);
+        writel(base + VTD_GCMD_REG, gcmd);
+
+        timeout = VTD_TIMEOUT;
+        while (timeout-- > 0) {
+            gsts = readl(base + VTD_GSTS_REG);
+            if (!(gsts & VTD_GSTS_QIES))
+                break;
+        }
+        if (gsts & VTD_GSTS_QIES) {
+            printf("    WARNING: Timeout disabling queued invalidation\n");
+            return false;
+        }
+        printf("    Queued invalidation disabled\n");
+    }
+
+    return true;
 }
 
 /*
