@@ -304,7 +304,7 @@ static struct smbios_21_entry_point *synthesize_smbios_21_from_30(
     ep21->intermediate_checksum = 0;
     ep21->intermediate_checksum = -smbios_checksum((uint8_t *)ep21 + 0x10,
                                                     SMBIOS_21_ENTRY_POINT_LENGTH - 0x10);
-    ep21->checksum = -smbios_checksum(ep21, 0x10);
+    ep21->checksum = -smbios_checksum(ep21, SMBIOS_21_ENTRY_POINT_LENGTH);
 
     printf("  Synthesis complete: SMBIOS %u.%u, %u structures, table at %x\n",
            ep21->smbios_major_version, ep21->smbios_minor_version,
@@ -359,7 +359,7 @@ static struct smbios_21_entry_point *relocate_smbios_21(
     new_ep->checksum = 0;
     new_ep->intermediate_checksum = 0;
     new_ep->intermediate_checksum = -smbios_checksum((uint8_t *)new_ep + 0x10, ep_size - 0x10);
-    new_ep->checksum = -smbios_checksum(new_ep, 0x10);
+    new_ep->checksum = -smbios_checksum(new_ep, ep_size);
 
     printf("  Relocation complete, new structure table at %x\n",
            new_ep->structure_table_address);
