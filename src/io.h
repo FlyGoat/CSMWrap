@@ -7,15 +7,15 @@
 
 #define barrier() __asm__ __volatile__("": : :"memory")
 
-// Check CPUID.01H:EDX[19] for CLFLUSH support
-static inline bool cpu_has_clflush(void) {
-    uint32_t eax, ebx, ecx, edx;
-    asm volatile ("cpuid" : "=a"(eax), "=b"(ebx), "=c"(ecx), "=d"(edx) : "a"(1) : "memory");
-    return (edx >> 19) & 1;
-}
-
 static inline void clflush(void *addr) {
-    if (cpu_has_clflush()) {
+    // Cache CPUID.01H:EDX[19] (CLFLUSH support) to avoid repeated CPUID calls
+    static int has_clflush = -1;
+    if (has_clflush == -1) {
+        uint32_t eax, ebx, ecx, edx;
+        asm volatile ("cpuid" : "=a"(eax), "=b"(ebx), "=c"(ecx), "=d"(edx) : "a"(1) : "memory");
+        has_clflush = (edx >> 19) & 1;
+    }
+    if (has_clflush) {
         asm volatile ("clflush (%0)" :: "r"(addr) : "memory");
     } else {
         // Fall back to wbinvd (flushes entire cache, requires ring 0)
