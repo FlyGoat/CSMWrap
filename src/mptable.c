@@ -430,6 +430,15 @@ struct irq_find_ctx {
     uint16_t flags;     /* Output: ACPI interrupt flags */
 };
 
+/* Convert uACPI resource flags to ACPI MADT interrupt flags format */
+static uint16_t uacpi_flags_to_madt(uint8_t triggering, uint8_t polarity)
+{
+    uint16_t flags = 0;
+    flags |= polarity ? ACPI_MADT_POLARITY_ACTIVE_LOW : ACPI_MADT_POLARITY_ACTIVE_HIGH;
+    flags |= triggering ? ACPI_MADT_TRIGGERING_EDGE : ACPI_MADT_TRIGGERING_LEVEL;
+    return flags;
+}
+
 /* Callback to find IRQ in resource list */
 static uacpi_iteration_decision find_irq_callback(void *user, uacpi_resource *resource)
 {
@@ -438,14 +447,13 @@ static uacpi_iteration_decision find_irq_callback(void *user, uacpi_resource *re
     if (resource->type == UACPI_RESOURCE_TYPE_IRQ) {
         if (resource->irq.num_irqs > 0) {
             ctx->gsi = resource->irq.irqs[0];
-            /* Convert uACPI flags to ACPI MADT flags format */
-            ctx->flags = (resource->irq.triggering << 2) | resource->irq.polarity;
+            ctx->flags = uacpi_flags_to_madt(resource->irq.triggering, resource->irq.polarity);
             return UACPI_ITERATION_DECISION_BREAK;
         }
     } else if (resource->type == UACPI_RESOURCE_TYPE_EXTENDED_IRQ) {
         if (resource->extended_irq.num_irqs > 0) {
             ctx->gsi = resource->extended_irq.irqs[0];
-            ctx->flags = (resource->extended_irq.triggering << 2) | resource->extended_irq.polarity;
+            ctx->flags = uacpi_flags_to_madt(resource->extended_irq.triggering, resource->extended_irq.polarity);
             return UACPI_ITERATION_DECISION_BREAK;
         }
     }
