@@ -9,6 +9,11 @@ bits 16
 
 section .rodata
 
+; APIC MSR
+%define MSR_IA32_APIC_BASE          0x1B
+%define APIC_BASE_EXTD              (1 << 10)
+%define APIC_BASE_EN                (1 << 11)
+
 ; AMD MTRR MSR addresses
 %define MSR_SYS_CFG                 0xC0010010
 %define SYS_CFG_MTRR_FIX_DRAM_EN    (1 << 18)
@@ -142,6 +147,16 @@ ap_trampoline_start:
     jmp .unlock_failed
 
 .continue_boot:
+
+    ; Hardware-disable LAPIC to prevent the legacy OS from sending IPIs
+    ; (including INIT) to this core. The helper core communicates via
+    ; memory mailbox only and does not need interrupt delivery.
+    ; Must clear both EN (bit 11) and EXTD (bit 10) simultaneously
+    ; to correctly transition from x2APIC mode to disabled state.
+    mov ecx, MSR_IA32_APIC_BASE
+    rdmsr
+    and eax, ~(APIC_BASE_EN | APIC_BASE_EXTD)
+    wrmsr
 
     ; Load 32-bit values into registers for SeaBIOS
     ; (16-bit mode can still use 32-bit registers with operand size prefix)
