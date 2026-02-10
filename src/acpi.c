@@ -94,7 +94,7 @@ struct mapped_io {
 
 uacpi_status uacpi_kernel_io_map(uacpi_io_addr base, uacpi_size len, uacpi_handle *out_handle) {
     void *handle;
-    if (gBS->AllocatePool(EfiLoaderData, sizeof(uacpi_pci_address), &handle) != EFI_SUCCESS) {
+    if (gBS->AllocatePool(EfiLoaderData, sizeof(struct mapped_io), &handle) != EFI_SUCCESS) {
         return UACPI_STATUS_OUT_OF_MEMORY;
     }
 
