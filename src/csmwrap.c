@@ -642,23 +642,23 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
         printf("AllocatePool() for EFI memory map failed!");
         return -1;
     }
+    size_t retries = 0;
+
+retry:
     Status = gBS->GetMemoryMap(&efi_mmap_size, efi_mmap, &efi_mmap_key, &efi_desc_size, &efi_desc_ver);
-    if (Status != EFI_SUCCESS) {
+    if (retries == 0 && Status != EFI_SUCCESS) {
         printf("GetMemoryMap() failed!");
         return -1;
     }
 
-    // It may take N amounts of ExitBootServices() calls to complete...
-    // Cap at 128.
-    for (size_t i = 0; i < 128; i++) {
-        Status = gBS->ExitBootServices(ImageHandle, efi_mmap_key);
-        if (Status == EFI_SUCCESS) {
-            break;
-        }
-    }
+    Status = gBS->ExitBootServices(ImageHandle, efi_mmap_key);
     if (Status != EFI_SUCCESS) {
-        printf("Failed to exit boot services!");
-        return -1;
+        if (retries == 128) {
+            printf("Failed to exit boot services!");
+            return -1;
+        }
+        retries++;
+        goto retry;
     }
 
     /* Invalidate boot services console output - protocol is no longer usable */
