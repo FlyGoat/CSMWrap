@@ -20,7 +20,7 @@ static EFI_GUID gEfiLegacyRegion2ProtocolGuid = EFI_LEGACY_REGION2_PROTOCOL_GUID
 #define PAM0_REGISTER  0x90    /* Q35 chipset */
 #define PAM_LOCK_BIT   0x01    /* Bit indicating PAM registers are locked */
 #define PAM_LOCK_REG   0x80    /* Register containing PAM lock bit on newer Intel chipsets */
-#define PAM_ENABLE     0x33    /* Value to enable read/write (0x30 for read, 0x03 for write) */
+#define PAM_ENABLE     0x33    /* Enable read+write for both halves of PAM1-PAM6 */
 
 
 /*
@@ -189,7 +189,7 @@ int unlock_skylake_pam(void)
     }
 
     /* Enable read+write for PAM0-PAM6 (0x80-0x86) */
-    pciConfigWriteByte(0, 0, 0, 0x80, 0x30);        /* PAM0 special case (typically only enables read) */
+    pciConfigWriteByte(0, 0, 0, 0x80, 0x30);        /* PAM0: bits[5:4]=11 enables read+write; bits[1:0] kept 0 to avoid setting PAM lock */
     pciConfigWriteByte(0, 0, 0, 0x81, PAM_ENABLE);  /* PAM1 */
     pciConfigWriteByte(0, 0, 0, 0x82, PAM_ENABLE);  /* PAM2 */
     pciConfigWriteByte(0, 0, 0, 0x83, PAM_ENABLE);  /* PAM3 */
