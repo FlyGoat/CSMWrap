@@ -686,7 +686,9 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
 
     /* Copy ROM to location, as late as possible */
     memcpy((void*)csm_bin_base, Csm16_bin, sizeof(Csm16_bin));
-    memcpy((void*)VGABIOS_START, vbios_loc, vbios_size);
+    if (vbios_loc != NULL) {
+        memcpy((void*)VGABIOS_START, vbios_loc, vbios_size);
+    }
 
     /*
      * Start the BIOS proxy helper core now that CSM is in its final location.
