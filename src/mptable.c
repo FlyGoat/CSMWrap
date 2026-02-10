@@ -659,6 +659,7 @@ bool mptable_init(struct csmwrap_priv *priv)
     /* Build config table first, then floating pointer */
     struct mptable_config *config = (struct mptable_config *)(uintptr_t)(table_addr + sizeof(struct mptable_floating));
     uint8_t *entry_ptr = (uint8_t *)(config + 1);
+    uint8_t *entry_end = (uint8_t *)(uintptr_t)(table_addr + total_size);
     uint16_t entry_count = 0;
 
     /* Config header */
@@ -771,6 +772,10 @@ bool mptable_init(struct csmwrap_priv *priv)
         if (prt_status != UACPI_STATUS_OK || !prt) continue;
 
         for (size_t i = 0; i < prt->num_entries; i++) {
+            if (entry_ptr + sizeof(struct mpt_intsrc) > entry_end) {
+                printf("mptable: table full, truncating PCI interrupt entries\n");
+                goto prt_done;
+            }
             uacpi_pci_routing_table_entry *e = &prt->entries[i];
             int32_t gsi;
             uint16_t acpi_flags = 0;
@@ -814,6 +819,7 @@ bool mptable_init(struct csmwrap_priv *priv)
 
         uacpi_free_pci_routing_table(prt);
     }
+prt_done:
 
     /* Local interrupt entries */
     /* ExtINT on LINT0 (for 8259 PIC passthrough) - BSP only */
