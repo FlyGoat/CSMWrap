@@ -661,6 +661,9 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
         return -1;
     }
 
+    /* Invalidate boot services console output - protocol is no longer usable */
+    gST->ConOut = NULL;
+
     /* Disable external interrupts */
     asm volatile ("cli");
 
