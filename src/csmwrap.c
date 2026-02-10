@@ -572,7 +572,10 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
     }
 
     /* Initialize ACPI first (needed for MADT parsing in bios_proxy_init) */
-    acpi_init(&priv);
+    if (!acpi_init(&priv)) {
+        printf("FATAL: ACPI initialization failed\n");
+        return -1;
+    }
 
     /* Calculate RSDP copy location for MADT patching */
     void *rsdp_copy = priv.csm_bin + (priv.csm_efi_table->AcpiRsdPtrPointer - priv.csm_bin_base);
