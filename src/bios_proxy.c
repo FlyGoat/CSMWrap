@@ -152,6 +152,11 @@ static void start_ap_xapic(uint32_t apic_id)
 
     *icr_high = apic_id << 24;
     *icr_low = 0x4600 | AP_TRAMPOLINE_VECTOR;  /* SIPI */
+    delay(200000);
+    wait_icr_idle_xapic(lapic_base);
+
+    *icr_high = apic_id << 24;
+    *icr_low = 0x4600 | AP_TRAMPOLINE_VECTOR;  /* SIPI (retry) */
     wait_icr_idle_xapic(lapic_base);
 }
 
@@ -163,6 +168,8 @@ static void start_ap_x2apic(uint32_t apic_id)
     wrmsr(X2APIC_ICR, ((uint64_t)apic_id << 32) | 0x4500);  /* INIT */
     delay(10000000);
     wrmsr(X2APIC_ICR, ((uint64_t)apic_id << 32) | 0x4600 | AP_TRAMPOLINE_VECTOR);  /* SIPI */
+    delay(200000);
+    wrmsr(X2APIC_ICR, ((uint64_t)apic_id << 32) | 0x4600 | AP_TRAMPOLINE_VECTOR);  /* SIPI (retry) */
 }
 
 static void start_ap(uint32_t apic_id)
