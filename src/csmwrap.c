@@ -63,7 +63,7 @@ static void *find_table(uint32_t signature, uint8_t *csm_bin_base, size_t size)
 
     Done  = FALSE;
     Table = NULL;
-    for (Ptr = csm_bin_base; Ptr < (csm_bin_base + size) && !Done; Ptr += 0x10) {
+    for (Ptr = csm_bin_base; Ptr + 4 <= (csm_bin_base + size) && !Done; Ptr += 0x10) {
         if (*(uint32_t *)Ptr == signature) {
             Table  = Ptr;
             // FIXME: Get checksum?
@@ -693,6 +693,12 @@ retry:
     /* Copy ROM to location, as late as possible */
     memcpy((void*)csm_bin_base, Csm16_bin, sizeof(Csm16_bin));
     if (vbios_loc != NULL) {
+        uintptr_t max_vbios_size = csm_bin_base - VGABIOS_START;
+        if (vbios_size > max_vbios_size) {
+            printf("VBIOS too large (%u bytes, max %u) - truncating\n",
+                   (unsigned)vbios_size, (unsigned)max_vbios_size);
+            vbios_size = max_vbios_size;
+        }
         memcpy((void*)VGABIOS_START, vbios_loc, vbios_size);
     }
 
