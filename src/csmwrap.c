@@ -595,7 +595,8 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
     if (bios_proxy_init(Csm16_bin, sizeof(Csm16_bin), rsdp_copy) != 0) {
         panic("BIOS proxy initialization failed\n");
     }
-    pci_early_initialize();
+    if (!pci_early_initialize())
+        printf("pci_early_initialize failed, PCI BAR relocation will be skipped\n");
 
     Status = csmwrap_video_init(&priv);
 
