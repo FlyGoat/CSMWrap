@@ -220,44 +220,25 @@ void uacpi_kernel_reset_event(uacpi_handle handle) {
     (void)handle;
 }
 
-// Borrowed from https://github.com/limine-bootloader/limine/blob/v9.x/common/lib/time.c
+static uint64_t tsc_freq;  /* TSC ticks per second, calibrated at init */
+static uint64_t tsc_boot;  /* TSC value at calibration time */
 
-static int get_jdn(int days, int months, int years) {
-    return (1461 * (years + 4800 + (months - 14) / 12)) / 4
-        + (367 * (months - 2 - 12 * ((months - 14) / 12))) / 12
-        - (3 * ((years + 4900 + (months - 14) / 12) / 100)) / 4
-        + days - 32075;
-}
-
-#define NS_PER_S UINT64_C(1000000000)
-
-static uint64_t get_unix_epoch(
-        uint32_t nanoseconds, uint8_t seconds, uint8_t minutes, uint8_t hours,
-        uint8_t days, uint8_t months, uint16_t years) {
-    uint64_t jdn_current = get_jdn(days, months, years);
-    uint64_t jdn_1970 = get_jdn(1, 1, 1970);
-    uint64_t jdn_diff = jdn_current - jdn_1970;
-
-    return (jdn_diff * 60 * 60 * 24 * NS_PER_S)
-        + (hours * 3600 * NS_PER_S)
-        + (minutes * 60 * NS_PER_S)
-        + (seconds * NS_PER_S)
-        + nanoseconds;
+/*
+ * Calibrate TSC frequency using gBS->Stall() as a reference.
+ * Called once during acpi_init(), before any uACPI timing calls.
+ */
+static void calibrate_tsc(void) {
+    uint64_t start = rdtsc();
+    gBS->Stall(1000);  /* 1ms */
+    uint64_t end = rdtsc();
+    tsc_freq = (end - start) * 1000;
+    tsc_boot = rdtsc();
 }
 
 uacpi_u64 uacpi_kernel_get_nanoseconds_since_boot(void) {
-    EFI_TIME time;
-    if (gRT->GetTime(&time, NULL) != EFI_SUCCESS) {
-        return 0;
-    }
-
-    uint64_t boot_time = get_unix_epoch(
-        gTimeAtBoot.Nanosecond, gTimeAtBoot.Second, gTimeAtBoot.Minute,
-        gTimeAtBoot.Hour, gTimeAtBoot.Day, gTimeAtBoot.Month, gTimeAtBoot.Year);
-    uint64_t current_time = get_unix_epoch(
-        time.Nanosecond, time.Second, time.Minute, time.Hour, time.Day, time.Month, time.Year);
-
-    return current_time - boot_time;
+    uint64_t elapsed = rdtsc() - tsc_boot;
+    /* Convert to nanoseconds: elapsed * 1e9 / tsc_freq */
+    return elapsed / (tsc_freq / 1000000000ULL);
 }
 
 void uacpi_kernel_stall(uacpi_u8 usec) {
@@ -358,6 +339,8 @@ bool acpi_init(struct csmwrap_priv *priv) {
     EFI_GUID acpiGuid = ACPI_TABLE_GUID;
     EFI_GUID acpi2Guid = ACPI_20_TABLE_GUID;
     void *table_target = priv->csm_bin + (priv->csm_efi_table->AcpiRsdPtrPointer - priv->csm_bin_base);
+
+    calibrate_tsc();
 
     for (i = 0; i < gST->NumberOfTableEntries; i++) {
         EFI_CONFIGURATION_TABLE *table;
