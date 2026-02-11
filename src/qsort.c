@@ -2,10 +2,17 @@
 
 // Function to swap two elements
 static void swap(void* a, void* b, size_t size) {
-    char temp[size];
-    memcpy(temp, a, size);
-    memcpy(a, b, size);
-    memcpy(b, temp, size);
+    char buf[16];
+    char *ca = a, *cb = b;
+    while (size > 0) {
+        size_t chunk = size < sizeof(buf) ? size : sizeof(buf);
+        memcpy(buf, ca, chunk);
+        memcpy(ca, cb, chunk);
+        memcpy(cb, buf, chunk);
+        ca += chunk;
+        cb += chunk;
+        size -= chunk;
+    }
 }
 
 // Partition function
