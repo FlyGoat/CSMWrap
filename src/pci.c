@@ -728,7 +728,7 @@ no_prefetch_range:
         }
 
         // Check the bar type to figure out whether it's a 64-bit bar
-        is_64bit = (bar_value & (2 << 1)) != 0;
+        is_64bit = (bar_value & 0x6) == 0x4;
         prefetchable = (bar_value & (1 << 3)) != 0;
 
         // Mask out the flag bits to get the bar address
