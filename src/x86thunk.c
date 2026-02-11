@@ -437,7 +437,7 @@ bool InternalLegacyBiosFarCall (uint16_t Segment, uint16_t Offset, EFI_IA32_REGI
 
 // Return final pointer
 uintptr_t LegacyBiosInitializeThunkAndTable(uintptr_t MemoryAddress, size_t data_size) {
-  uintptr_t data_pages = (data_size / EFI_PAGE_SIZE) + 1;
+  uintptr_t data_pages = (data_size + EFI_PAGE_SIZE - 1) / EFI_PAGE_SIZE;
 
   mThunkContext.RealModeBuffer     = (void *)(uintptr_t)(MemoryAddress + (data_pages * EFI_PAGE_SIZE));
   mThunkContext.RealModeBufferSize = EFI_PAGE_SIZE;
