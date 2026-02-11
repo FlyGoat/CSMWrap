@@ -36,6 +36,7 @@ struct pch_info {
 #define INTEL_ARROWLAKE         0xC6
 #define INTEL_ARROWLAKE_H       0xC5
 #define INTEL_ARROWLAKE_U       0xB5
+#define INTEL_LUNARLAKE         0xBD
 #define INTEL_PANTHERLAKE_L     0xCC
 
 static bool get_pch_info(struct pch_info *info)
@@ -58,6 +59,7 @@ static bool get_pch_info(struct pch_info *info)
     case INTEL_ARROWLAKE:
     case INTEL_ARROWLAKE_H:
     case INTEL_ARROWLAKE_U:
+    case INTEL_LUNARLAKE:
         info->sbreg_bar = 0xE0000000;
         info->pid_itss = 0xCA;
         return true;
