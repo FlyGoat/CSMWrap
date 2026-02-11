@@ -517,11 +517,11 @@ static EFI_STATUS csmwrap_video_seavgabios_init(struct csmwrap_priv *priv)
             cb_fb->reserved_mask_size = 8;
             break;
         case PixelBitMask:
-            // Calculate position (find first set bit)
-            cb_fb->red_mask_pos = __builtin_ffs(info->PixelInformation.RedMask) - 1;
-            cb_fb->green_mask_pos = __builtin_ffs(info->PixelInformation.GreenMask) - 1;
-            cb_fb->blue_mask_pos = __builtin_ffs(info->PixelInformation.BlueMask) - 1;
-            cb_fb->reserved_mask_pos = __builtin_ffs(info->PixelInformation.ReservedMask) - 1;
+            // Calculate position (find first set bit, 0 if mask is empty)
+            cb_fb->red_mask_pos = info->PixelInformation.RedMask ? __builtin_ffs(info->PixelInformation.RedMask) - 1 : 0;
+            cb_fb->green_mask_pos = info->PixelInformation.GreenMask ? __builtin_ffs(info->PixelInformation.GreenMask) - 1 : 0;
+            cb_fb->blue_mask_pos = info->PixelInformation.BlueMask ? __builtin_ffs(info->PixelInformation.BlueMask) - 1 : 0;
+            cb_fb->reserved_mask_pos = info->PixelInformation.ReservedMask ? __builtin_ffs(info->PixelInformation.ReservedMask) - 1 : 0;
 
             // Calculate size (count set bits)
             cb_fb->red_mask_size = __builtin_popcount(info->PixelInformation.RedMask);
