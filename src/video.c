@@ -626,9 +626,11 @@ static bool is_amd_rdna_or_newer(uint16_t vendor_id, uint16_t device_id)
      * AMD RDNA 1/2/3/4 discrete GPUs (Navi series):
      * - 0x73xx: Navi 10/12/14 (RDNA 1), Navi 21/22/23 (RDNA 2)
      * - 0x74xx: Navi 24 (RDNA 2), Navi 31/32/33 (RDNA 3)
+     * - 0x75xx: Navi 48/44 (RDNA 4)
      */
     if ((device_id & 0xFF00) == 0x7300 ||
-        (device_id & 0xFF00) == 0x7400)
+        (device_id & 0xFF00) == 0x7400 ||
+        (device_id & 0xFF00) == 0x7500)
         return true;
 
     /*
