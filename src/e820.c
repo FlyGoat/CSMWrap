@@ -201,10 +201,6 @@ int build_e820_map(struct csmwrap_priv *priv, EFI_MEMORY_DESCRIPTOR *memory_map,
         if (start == end)
             continue;
 
-        /* Skip memory types that are not reported in E820 */
-        if (type == 0)
-            continue;
-
         e820_add(priv, start, end - start, type);
     }
 
