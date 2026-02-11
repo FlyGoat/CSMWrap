@@ -271,11 +271,11 @@ static struct acpi_madt *create_patched_madt(int helper_apic_id)
     struct acpi_madt *orig_madt = (struct acpi_madt *)madt_table.virt_addr;
     uint32_t orig_len = orig_madt->hdr.length;
 
-    /* First pass: find the entry to remove and calculate new size */
+    /* First pass: find entries to remove and calculate new size */
     uint8_t *entry = (uint8_t *)(orig_madt + 1);
     uint8_t *end = (uint8_t *)orig_madt + orig_len;
-    uint8_t *helper_entry = NULL;
-    uint8_t helper_entry_len = 0;
+    uint32_t removed_bytes = 0;
+    bool found = false;
 
     while (entry < end) {
         uint8_t type = entry[0];
@@ -285,29 +285,27 @@ static struct acpi_madt *create_patched_madt(int helper_apic_id)
         if (type == ACPI_MADT_ENTRY_TYPE_LAPIC) {
             struct acpi_madt_lapic *lapic = (struct acpi_madt_lapic *)entry;
             if (lapic->id == helper_apic_id) {
-                helper_entry = entry;
-                helper_entry_len = len;
-                break;
+                removed_bytes += len;
+                found = true;
             }
         } else if (type == ACPI_MADT_ENTRY_TYPE_LOCAL_X2APIC) {
             struct acpi_madt_x2apic *x2apic = (struct acpi_madt_x2apic *)entry;
             if (x2apic->id == (uint32_t)helper_apic_id) {
-                helper_entry = entry;
-                helper_entry_len = len;
-                break;
+                removed_bytes += len;
+                found = true;
             }
         }
         entry += len;
     }
 
-    if (!helper_entry) {
+    if (!found) {
         printf("Warning: helper core APIC ID %d not found in MADT\n", helper_apic_id);
         uacpi_table_unref(&madt_table);
         return NULL;
     }
 
     /* Allocate new MADT (must be < 4GB for legacy OS) */
-    uint32_t new_len = orig_len - helper_entry_len;
+    uint32_t new_len = orig_len - removed_bytes;
     EFI_PHYSICAL_ADDRESS new_madt_addr = 0xFFFFFFFF;
     EFI_STATUS status = gBS->AllocatePages(
         AllocateMaxAddress,
@@ -323,14 +321,33 @@ static struct acpi_madt *create_patched_madt(int helper_apic_id)
 
     struct acpi_madt *new_madt = (struct acpi_madt *)(uintptr_t)new_madt_addr;
 
-    /* Copy MADT, skipping the helper entry */
-    uint8_t *src = (uint8_t *)orig_madt;
-    uint8_t *dst = (uint8_t *)new_madt;
-    size_t before_len = helper_entry - (uint8_t *)orig_madt;
-    size_t after_len = end - (helper_entry + helper_entry_len);
+    /* Copy MADT header */
+    memcpy(new_madt, orig_madt, sizeof(struct acpi_madt));
 
-    memcpy(dst, src, before_len);
-    memcpy(dst + before_len, helper_entry + helper_entry_len, after_len);
+    /* Copy entries, skipping all matching helper core entries */
+    uint8_t *dst = (uint8_t *)(new_madt + 1);
+    entry = (uint8_t *)(orig_madt + 1);
+
+    while (entry < end) {
+        uint8_t type = entry[0];
+        uint8_t len = entry[1];
+        if (len < 2) break;
+
+        bool skip = false;
+        if (type == ACPI_MADT_ENTRY_TYPE_LAPIC) {
+            struct acpi_madt_lapic *lapic = (struct acpi_madt_lapic *)entry;
+            if (lapic->id == helper_apic_id) skip = true;
+        } else if (type == ACPI_MADT_ENTRY_TYPE_LOCAL_X2APIC) {
+            struct acpi_madt_x2apic *x2apic = (struct acpi_madt_x2apic *)entry;
+            if (x2apic->id == (uint32_t)helper_apic_id) skip = true;
+        }
+
+        if (!skip) {
+            memcpy(dst, entry, len);
+            dst += len;
+        }
+        entry += len;
+    }
 
     /* Update header */
     new_madt->hdr.length = new_len;
