@@ -136,6 +136,7 @@ static bool vtd_disable_unit(uint64_t reg_base) {
             gsts = readl(base + VTD_GSTS_REG);
             if (!(gsts & VTD_GSTS_TES))
                 break;
+            asm volatile("pause");
         }
         if (gsts & VTD_GSTS_TES) {
             printf("    WARNING: Timeout disabling translation\n");
@@ -155,6 +156,7 @@ static bool vtd_disable_unit(uint64_t reg_base) {
             gsts = readl(base + VTD_GSTS_REG);
             if (!(gsts & VTD_GSTS_IRES))
                 break;
+            asm volatile("pause");
         }
         if (gsts & VTD_GSTS_IRES) {
             printf("    WARNING: Timeout disabling interrupt remapping\n");
@@ -174,6 +176,7 @@ static bool vtd_disable_unit(uint64_t reg_base) {
             gsts = readl(base + VTD_GSTS_REG);
             if (!(gsts & VTD_GSTS_QIES))
                 break;
+            asm volatile("pause");
         }
         if (gsts & VTD_GSTS_QIES) {
             printf("    WARNING: Timeout disabling queued invalidation\n");
