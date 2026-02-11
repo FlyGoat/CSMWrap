@@ -79,12 +79,13 @@ static int is_x2apic_mode(void)
  */
 static uint32_t find_helper_16_entry(void *csm_base, size_t csm_size, uintptr_t final_base)
 {
-    uint8_t *base = (uint8_t *)csm_base;
-    uint8_t *end = base + csm_size - 16;
+    /* Signature is 8-byte aligned in romlayout.S */
+    uint64_t *base = (uint64_t *)csm_base;
+    uint64_t *end = (uint64_t *)((uint8_t *)csm_base + csm_size - 16);
 
-    for (uint8_t *ptr = base; ptr < end; ptr++) {
-        if (*(uint64_t *)ptr == HELPER_16_ENTRY_SIGNATURE) {
-            uint32_t offset_in_binary = (ptr - base) + 8;  /* Skip signature */
+    for (uint64_t *ptr = base; ptr < end; ptr++) {
+        if (*ptr == HELPER_16_ENTRY_SIGNATURE) {
+            uint32_t offset_in_binary = ((uint8_t *)ptr - (uint8_t *)csm_base) + 8;  /* Skip signature */
             return (uint32_t)final_base + offset_in_binary;
         }
     }
