@@ -693,9 +693,6 @@ EFI_STATUS csmwrap_video_init(struct csmwrap_priv *priv)
         return 0;
     }
 
-    printf("FATAL: No video initialization method available!\n");
-    printf("       Neither OpROM nor SeaVGABIOS could be initialized.\n");
-    for (;;)
-        asm volatile ("hlt");
+    panic("No video initialization method available\n");
 }
 

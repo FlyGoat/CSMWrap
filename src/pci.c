@@ -1306,9 +1306,8 @@ bool pci_late_initialize(void) {
     flanterm_ctx = saved_flanterm_ctx;
 
     if (priv.cb_fb.physical_address >= 0x100000000ULL) {
-        printf("FATAL: Framebuffer at 0x%llx is above 4GB and could not be relocated\n",
-               priv.cb_fb.physical_address);
-        while (1) { asm volatile("hlt"); }
+        panic("Framebuffer at 0x%llx is above 4GB and could not be relocated\n",
+              priv.cb_fb.physical_address);
     }
 
     return true;

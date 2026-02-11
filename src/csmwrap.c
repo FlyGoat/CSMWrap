@@ -1,3 +1,5 @@
+#include <stdarg.h>
+
 #include <efi.h>
 #include <csmwrap.h>
 
@@ -470,6 +472,17 @@ int set_smbios_table()
     return 0;
 }
 
+void __attribute__((noreturn)) panic(const char *fmt, ...)
+{
+    printf("\n*** PANIC: ");
+    va_list l;
+    va_start(l, fmt);
+    vprintf(fmt, l);
+    va_end(l);
+    printf("*** System halted.\n");
+    for (;;) { asm volatile("hlt"); }
+}
+
 EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
 {
     EFI_PHYSICAL_ADDRESS HiPmm;
@@ -508,8 +521,7 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
     }
 
     if (gRT->GetTime(&gTimeAtBoot, NULL) != EFI_SUCCESS) {
-        printf("Failed to query current time\n");
-        return -1;
+        panic("Failed to query current time\n");
     }
 
     EFI_GUID loaded_image_guid = EFI_LOADED_IMAGE_PROTOCOL_GUID;
@@ -550,8 +562,7 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
     }
 
     if (unlock_bios_region()) {
-        printf("Unable to unlock BIOS region\n");
-        return -1;
+        panic("Unable to unlock BIOS region\n");
     }
     printf("Unlock!\n");
 
@@ -561,20 +572,17 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
     priv.csm_bin_base = csm_bin_base;
     printf("csm_bin_base: 0x%lx\n", csm_bin_base);
     if (csm_bin_base < VGABIOS_END) {
-        printf("Illegal csm_bin size \n");
-        return -1;
+        panic("Illegal csm_bin size\n");
     }
 
     priv.csm_efi_table = find_table(EFI_COMPATIBILITY16_TABLE_SIGNATURE, Csm16_bin, sizeof(Csm16_bin));
     if (priv.csm_efi_table == NULL) {
-        printf("EFI_COMPATIBILITY16_TABLE not found\n");
-        return -1;
+        panic("EFI_COMPATIBILITY16_TABLE not found\n");
     }
 
     /* Initialize ACPI first (needed for MADT parsing in bios_proxy_init) */
     if (!acpi_init(&priv)) {
-        printf("FATAL: ACPI initialization failed\n");
-        return -1;
+        panic("ACPI initialization failed\n");
     }
 
     /* Calculate RSDP copy location for MADT patching */
@@ -582,8 +590,7 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
 
     /* Initialize BIOS proxy (find mailbox and helper entry in CSM binary) */
     if (bios_proxy_init(Csm16_bin, sizeof(Csm16_bin), rsdp_copy) != 0) {
-        printf("FATAL: BIOS proxy initialization failed\n");
-        for (;;) { asm volatile ("hlt"); }
+        panic("BIOS proxy initialization failed\n");
     }
     pci_early_initialize();
 
@@ -591,8 +598,7 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
 
     HiPmm = 0xffffffff;
     if (gBS->AllocatePages(AllocateMaxAddress, EfiRuntimeServicesData, HIPMM_SIZE / EFI_PAGE_SIZE, &HiPmm) != EFI_SUCCESS) {
-        printf("Unable to alloc HiPmm!!!\n");
-        return -1;
+        panic("Unable to alloc HiPmm\n");
     }
 
     priv.low_stub = (struct low_stub *)LOW_STUB_BASE;
@@ -639,23 +645,20 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
     efi_mmap_size += 4096;
     Status = gBS->AllocatePool(EfiLoaderData, efi_mmap_size, (void **)&efi_mmap);
     if (Status != EFI_SUCCESS) {
-        printf("AllocatePool() for EFI memory map failed!");
-        return -1;
+        panic("AllocatePool() for EFI memory map failed\n");
     }
     size_t retries = 0;
 
 retry:
     Status = gBS->GetMemoryMap(&efi_mmap_size, efi_mmap, &efi_mmap_key, &efi_desc_size, &efi_desc_ver);
     if (retries == 0 && Status != EFI_SUCCESS) {
-        printf("GetMemoryMap() failed!");
-        return -1;
+        panic("GetMemoryMap() failed\n");
     }
 
     Status = gBS->ExitBootServices(ImageHandle, efi_mmap_key);
     if (Status != EFI_SUCCESS) {
         if (retries == 128) {
-            printf("Failed to exit boot services!");
-            return -1;
+            panic("Failed to exit boot services\n");
         }
         retries++;
         goto retry;
@@ -707,8 +710,7 @@ retry:
      * The helper core will handle BIOS calls when the main core is in V86 mode.
      */
     if (bios_proxy_start_helper(csm_bin_base) != 0) {
-        printf("FATAL: Failed to start BIOS proxy helper core\n");
-        for (;;) { asm volatile("hlt"); }
+        panic("Failed to start BIOS proxy helper core\n");
     }
 
     /* Disable flanterm after last potential panic point - SeaBIOS will take over video */

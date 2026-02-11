@@ -88,6 +88,10 @@ int printf(const char *restrict fmt, ...) {
     return ret;
 }
 
+int vprintf(const char *restrict fmt, va_list l) {
+    return npf_vpprintf(_putchar, NULL, fmt, l);
+}
+
 int snprintf(char *buffer, size_t bufsz, const char *restrict fmt, ...) {
     va_list l;
     va_start(l, fmt);
