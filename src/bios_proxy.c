@@ -9,6 +9,7 @@
 #include <efi.h>
 #include <csmwrap.h>
 #include <io.h>
+#include <time.h>
 #include <uacpi/uacpi.h>
 #include <uacpi/tables.h>
 #include <uacpi/acpi.h>
@@ -148,12 +149,12 @@ static void start_ap_xapic(uint32_t apic_id)
     wait_icr_idle_xapic(lapic_base);
     *icr_high = apic_id << 24;
     *icr_low = 0x4500;  /* INIT */
-    delay(10000000);
+    delay_us(10000);
     wait_icr_idle_xapic(lapic_base);
 
     *icr_high = apic_id << 24;
     *icr_low = 0x4600 | AP_TRAMPOLINE_VECTOR;  /* SIPI */
-    delay(200000);
+    delay_us(200);
     wait_icr_idle_xapic(lapic_base);
 
     *icr_high = apic_id << 24;
@@ -167,9 +168,9 @@ static void start_ap_xapic(uint32_t apic_id)
 static void start_ap_x2apic(uint32_t apic_id)
 {
     wrmsr(X2APIC_ICR, ((uint64_t)apic_id << 32) | 0x4500);  /* INIT */
-    delay(10000000);
+    delay_us(10000);
     wrmsr(X2APIC_ICR, ((uint64_t)apic_id << 32) | 0x4600 | AP_TRAMPOLINE_VECTOR);  /* SIPI */
-    delay(200000);
+    delay_us(200);
     wrmsr(X2APIC_ICR, ((uint64_t)apic_id << 32) | 0x4600 | AP_TRAMPOLINE_VECTOR);  /* SIPI (retry) */
 }
 

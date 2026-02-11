@@ -10,6 +10,7 @@
 #include <iommu.h>
 #include <apic.h>
 #include <pci.h>
+#include <time.h>
 #include <bios_proxy.h>
 #include <mptable.h>
 #include <flanterm.h>
@@ -493,6 +494,8 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
     gST = SystemTable;
     gBS = SystemTable->BootServices;
     gRT = SystemTable->RuntimeServices;
+
+    calibrate_tsc();
 
     csmwrap_video_early_init(&priv);
 

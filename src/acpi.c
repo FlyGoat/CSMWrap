@@ -2,6 +2,7 @@
 #include <io.h>
 #include <pci.h>
 #include <printf.h>
+#include <time.h>
 #include "csmwrap.h"
 
 #include <uacpi/kernel_api.h>
@@ -220,25 +221,8 @@ void uacpi_kernel_reset_event(uacpi_handle handle) {
     (void)handle;
 }
 
-static uint64_t tsc_freq;  /* TSC ticks per second, calibrated at init */
-static uint64_t tsc_boot;  /* TSC value at calibration time */
-
-/*
- * Calibrate TSC frequency using gBS->Stall() as a reference.
- * Called once during acpi_init(), before any uACPI timing calls.
- */
-static void calibrate_tsc(void) {
-    uint64_t start = rdtsc();
-    gBS->Stall(1000);  /* 1ms */
-    uint64_t end = rdtsc();
-    tsc_freq = (end - start) * 1000;
-    tsc_boot = rdtsc();
-}
-
 uacpi_u64 uacpi_kernel_get_nanoseconds_since_boot(void) {
-    uint64_t elapsed = rdtsc() - tsc_boot;
-    /* Convert to nanoseconds: elapsed * 1e9 / tsc_freq */
-    return elapsed / (tsc_freq / 1000000000ULL);
+    return get_nanoseconds_since_boot();
 }
 
 void uacpi_kernel_stall(uacpi_u8 usec) {
@@ -339,8 +323,6 @@ bool acpi_init(struct csmwrap_priv *priv) {
     EFI_GUID acpiGuid = ACPI_TABLE_GUID;
     EFI_GUID acpi2Guid = ACPI_20_TABLE_GUID;
     void *table_target = priv->csm_bin + (priv->csm_efi_table->AcpiRsdPtrPointer - priv->csm_bin_base);
-
-    calibrate_tsc();
 
     for (i = 0; i < gST->NumberOfTableEntries; i++) {
         EFI_CONFIGURATION_TABLE *table;
