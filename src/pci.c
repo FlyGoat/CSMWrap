@@ -650,7 +650,10 @@ static bool scan_bars(struct pci_device *device) {
             // Check if firmware placed this non-prefetchable window in a prefetchable region
             bar->firmware_in_prefetchable = is_address_in_prefetchable_range(device->root_bus, non_prefetchable_base);
 
-            add_bar(device->root_bus, bar);
+            if (!add_bar(device->root_bus, bar)) {
+                printf("add_bar() failed for bridge non-prefetchable window\n");
+                goto no_non_prefetch_range;
+            }
         }
 no_non_prefetch_range:
 
@@ -704,7 +707,10 @@ no_non_prefetch_range:
             // Check if firmware placed this window in a prefetchable region (should always be true for prefetchable windows)
             bar->firmware_in_prefetchable = is_address_in_prefetchable_range(device->root_bus, prefetchable_base);
 
-            add_bar(device->root_bus, bar);
+            if (!add_bar(device->root_bus, bar)) {
+                printf("add_bar() failed for bridge prefetchable window\n");
+                goto no_prefetch_range;
+            }
         }
 no_prefetch_range:
     }
