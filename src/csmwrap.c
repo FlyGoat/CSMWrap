@@ -502,7 +502,7 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
         EFI_PHYSICAL_ADDRESS j = i;
         if (gBS->AllocatePages(AllocateAddress, EfiLoaderData, 1, &j) != EFI_SUCCESS) {
             if (i < 0xa0000) {
-                printf("warning: Early AllocatePages() failed for address %p\n", i);
+                printf("warning: Early AllocatePages() failed for address 0x%llx\n", (unsigned long long)i);
             }
         }
     }
