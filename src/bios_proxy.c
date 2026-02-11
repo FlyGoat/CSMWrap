@@ -540,7 +540,7 @@ int bios_proxy_init(void *csm_base, size_t csm_size, void *rsdp_copy)
     EFI_PHYSICAL_ADDRESS stack_addr = 0xFFFFFFFF;
     EFI_STATUS status = gBS->AllocatePages(
         AllocateMaxAddress,
-        EfiLoaderCode,
+        EfiRuntimeServicesData,
         (HELPER_STACK_SIZE + 4095) / 4096,
         &stack_addr
     );
