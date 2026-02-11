@@ -209,11 +209,13 @@ static int find_available_ap(void)
         if (type == ACPI_MADT_ENTRY_TYPE_LAPIC) {
             struct acpi_madt_lapic *lapic = (struct acpi_madt_lapic *)entry;
             if ((lapic->flags & 0x3) && lapic->id != bsp_id) {
-                if ((int)lapic->id > highest_ap_id) highest_ap_id = lapic->id;
+                if (lapic->id > highest_ap_id) highest_ap_id = lapic->id;
             }
         } else if (type == ACPI_MADT_ENTRY_TYPE_LOCAL_X2APIC) {
             struct acpi_madt_x2apic *x2apic = (struct acpi_madt_x2apic *)entry;
-            if ((x2apic->flags & 0x3) && x2apic->id != bsp_id) {
+            /* Only consider APs with xAPIC-addressable IDs (<255) so we can
+               deliver INIT-SIPI; ID 0xFF is broadcast in physical dest mode */
+            if ((x2apic->flags & 0x3) && x2apic->id != bsp_id && x2apic->id < 0xFF) {
                 if ((int)x2apic->id > highest_ap_id) highest_ap_id = x2apic->id;
             }
         }
