@@ -187,8 +187,7 @@ static const char *device_type_str(uint16_t type)
  */
 static void add_bbs_entry(struct low_stub *low_stub,
                          const struct boot_device_info *info,
-                         int priority,
-                         int drive_index)
+                         int priority)
 {
     BBS_TABLE *entry;
     char *desc;
@@ -224,13 +223,6 @@ static void add_bbs_entry(struct low_stub *low_stub,
     entry->StatusFlags.Enabled = 1;
     entry->StatusFlags.MediaPresent = 2;  /* Media present and bootable */
 
-    /* Assigned drive number - 0x80 for first HDD, etc. */
-    if (info->device_type == BBS_FLOPPY) {
-        entry->AssignedDriveNumber = drive_index;
-    } else {
-        entry->AssignedDriveNumber = 0x80 + drive_index;
-    }
-
     /* Description string - stored in low memory */
     if (priority == 0) {
         snprintf(desc, BBS_DESC_STRING_SIZE, "Boot %s %02x:%02x.%x",
@@ -247,8 +239,7 @@ static void add_bbs_entry(struct low_stub *low_stub,
     entry->DescStringSegment = EFI_SEGMENT(desc_addr);
     entry->DescStringOffset = EFI_OFFSET(desc_addr);
 
-    printf("bootdev: BBS[%zu] %s pri=%d drv=0x%02x\n",
-           idx, desc, entry->BootPriority, entry->AssignedDriveNumber);
+    printf("bootdev: BBS[%zu] %s pri=%d\n", idx, desc, entry->BootPriority);
 
     low_stub->bbs_entry_count++;
 }
@@ -263,8 +254,6 @@ static int enumerate_block_devices(struct low_stub *low_stub,
     EFI_GUID block_io_guid = EFI_BLOCK_IO_PROTOCOL_GUID;
     EFI_HANDLE *handles = NULL;
     UINTN handle_count = 0;
-    int hdd_index = 0;
-    int cdrom_index = 0;
     int next_priority = 1;  /* Priority 0 reserved for boot device */
 
     /* Find all block I/O devices */
@@ -296,11 +285,10 @@ static int enumerate_block_devices(struct low_stub *low_stub,
             continue;
         }
 
-        int index = (dev_info.device_type == BBS_CDROM) ? cdrom_index++ : hdd_index++;
         bool is_boot_device = boot_info->valid && devices_match(&dev_info, boot_info);
         int priority = is_boot_device ? 0 : next_priority++;
 
-        add_bbs_entry(low_stub, &dev_info, priority, index);
+        add_bbs_entry(low_stub, &dev_info, priority);
     }
 
     gBS->FreePool(handles);
