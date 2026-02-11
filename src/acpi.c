@@ -232,7 +232,7 @@ static int get_jdn(int days, int months, int years) {
 #define NS_PER_S UINT64_C(1000000000)
 
 static uint64_t get_unix_epoch(
-        uint16_t nanoseconds, uint8_t seconds, uint8_t minutes, uint8_t hours,
+        uint32_t nanoseconds, uint8_t seconds, uint8_t minutes, uint8_t hours,
         uint8_t days, uint8_t months, uint16_t years) {
     uint64_t jdn_current = get_jdn(days, months, years);
     uint64_t jdn_1970 = get_jdn(1, 1, 1970);
