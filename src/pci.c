@@ -897,7 +897,7 @@ not_a_bridge:
     }
 
     if (bridge_bus != NULL && bridge_bus->range_count == 0) {
-        device->bridge_bus = NULL;;
+        device->bridge_bus = NULL;
     }
 
     if (!add_device(bus, device)) {
