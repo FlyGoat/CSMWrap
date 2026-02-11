@@ -4,7 +4,7 @@
 #include "csmwrap.h"
 
 /* This is not in E820.h */
-#define EfiAcpiAddressRangeHole     (-1UL)
+#define EfiAcpiAddressRangeHole     (-1ULL)
 
 static const char *
 e820_type_name(uint32_t type)
