@@ -155,7 +155,7 @@ static int pit_8254cge_workaround(void)
 #else
         if (reg) {
             printf("Invalid P2SB BARH\n");
-            return 0;
+            goto hide_and_return;
         }
 #endif
         /* Hide P2SB again */
@@ -177,6 +177,20 @@ static int pit_8254cge_workaround(void)
     writel(PCH_PCR_ADDRESS(base, pch.pid_itss, R_PCH_PCR_ITSS_ITSSPRC), reg);
 
     return 0;
+
+#ifndef __LP64__
+hide_and_return:
+    if (p2sb_hide) {
+        reg = pciConfigReadDWord(pch_pci_bus, PCI_DEVICE_NUMBER_PCH_P2SB,
+                                 PCI_FUNCTION_NUMBER_PCH_P2SB,
+                                 R_P2SB_CFG_P2SBC);
+        reg |= B_P2SB_CFG_P2SBC_HIDE;
+        pciConfigWriteDWord(pch_pci_bus, PCI_DEVICE_NUMBER_PCH_P2SB,
+                            PCI_FUNCTION_NUMBER_PCH_P2SB,
+                            R_P2SB_CFG_P2SBC, reg);
+    }
+    return 0;
+#endif
 }
 
 int apply_intel_platform_workarounds(void)
