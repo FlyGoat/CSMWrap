@@ -2,6 +2,7 @@
 
 #include <printf.h>
 #include "csmwrap.h"
+#include "io.h"
 
 /* This is not in E820.h */
 #define EfiAcpiAddressRangeHole     (-1ULL)
@@ -177,6 +178,81 @@ static uint32_t convert_memory_type(EFI_MEMORY_TYPE type)
     }
 }
 
+static inline void cmos_write(uint8_t reg, uint8_t val)
+{
+    outb(0x70, reg);
+    outb(0x71, val);
+}
+
+/*
+ * Write CMOS memory size registers to match the E820 map.
+ *
+ * UEFI firmware does not initialize legacy CMOS memory registers, leaving them
+ * with garbage values. Some legacy software (notably Windows 95 setup) reads
+ * CMOS directly to detect extended memory size, bypassing INT 15h and XMS.
+ *
+ * CMOS layout:
+ *   0x15/0x16: Base memory in KB (should be 640)
+ *   0x17/0x18: Extended memory between 1MB and 16MB, in KB (max 15360)
+ *   0x30/0x31: Extended memory between 1MB and 64MB, in KB (max 65535)
+ *   0x34/0x35: Extended memory above 16MB, in 64KB blocks (max 65535)
+ */
+static void
+e820_update_cmos(struct csmwrap_priv *priv)
+{
+    EFI_E820_ENTRY64 *e820_map = priv->low_stub->e820_map;
+    int e820_count = priv->low_stub->e820_entries;
+
+    /* Find end of contiguous RAM starting from 1MB */
+    uint64_t ram_end = 0x100000;
+    int progress = 1;
+    while (progress) {
+        progress = 0;
+        for (int i = 0; i < e820_count; i++) {
+            EFI_E820_ENTRY64 *e = &e820_map[i];
+            uint64_t e_end = e->BaseAddr + e->Length;
+            if (e->Type != EfiAcpiAddressRangeMemory &&
+                e->Type != EfiAcpiAddressRangeACPI)
+                continue;
+            if (e_end > 0xFFFFFFFFULL)
+                continue;
+            if (e->BaseAddr <= ram_end && e_end > ram_end) {
+                ram_end = e_end;
+                progress = 1;
+            }
+        }
+    }
+
+    uint64_t ext_kb = (ram_end > 0x100000) ? (ram_end - 0x100000) / 1024 : 0;
+    uint64_t above_16m_64k = (ram_end > 0x1000000) ?
+                             (ram_end - 0x1000000) / 65536 : 0;
+
+    /* Cap to register widths */
+    uint16_t cmos_17_18 = (ext_kb > 15360) ? 15360 : (uint16_t)ext_kb;
+    uint16_t cmos_30_31 = (ext_kb > 65535) ? 65535 : (uint16_t)ext_kb;
+    uint16_t cmos_34_35 = (above_16m_64k > 65535) ? 65535 :
+                          (uint16_t)above_16m_64k;
+
+    printf("CMOS: base=640 ext=%u KB >16M=%u x64KB (ram_end=0x%llx)\n",
+           cmos_30_31, cmos_34_35, ram_end);
+
+    /* Base memory: 640 KB */
+    cmos_write(0x15, 640 & 0xFF);
+    cmos_write(0x16, 640 >> 8);
+
+    /* Extended memory 1-16MB range in KB */
+    cmos_write(0x17, cmos_17_18 & 0xFF);
+    cmos_write(0x18, cmos_17_18 >> 8);
+
+    /* Extended memory 1-64MB range in KB */
+    cmos_write(0x30, cmos_30_31 & 0xFF);
+    cmos_write(0x31, cmos_30_31 >> 8);
+
+    /* Extended memory above 16MB in 64KB blocks */
+    cmos_write(0x34, cmos_34_35 & 0xFF);
+    cmos_write(0x35, cmos_34_35 >> 8);
+}
+
 /*
  * Build E820 memory map based on UEFI GetMemoryMap
  * Return the number of entries in the E820 map
@@ -224,6 +300,8 @@ int build_e820_map(struct csmwrap_priv *priv, EFI_MEMORY_DESCRIPTOR *memory_map,
     if (DEBUG_PRINT_LEVEL & DEBUG_VERBOSE) {
         dump_map(priv);
     }
+
+    e820_update_cmos(priv);
 
     return 0;
 }
