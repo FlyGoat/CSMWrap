@@ -14,24 +14,19 @@
 #include <uacpi/tables.h>
 #include <uacpi/acpi.h>
 
+/* Must match SeaBIOS stacks.c */
+#define BIOS_PROXY_SIGNATURE 0x79787250504D5343ULL  /* "CSMPPrxy" */
 #define HELPER_STACK_SIZE 4096
 
-/*
- * Fixed mailbox address in EBDA (Extended BIOS Data Area).
- * EBDA is 1KB at 0x9FC00-0xA0000. SeaBIOS uses ~0x121 bytes at the start.
- * Mailbox at 0x9FF00 is well clear of SeaBIOS's usage.
- * EBDA is normal RAM, immune to OS MTRR changes on the BIOS region.
- */
-#define BIOS_PROXY_MAILBOX_ADDR 0x9FF00
-
 struct bios_proxy_mailbox {
-    volatile uint32_t request_pending;  /* offset 0 */
-    uint32_t func_ptr;                  /* offset 4 */
-    uint32_t arg_eax;                   /* offset 8 */
-    uint32_t arg_edx;                   /* offset 12 */
-    uint32_t arg_ecx;                   /* offset 16 */
-    uint32_t result;                    /* offset 20 */
-    uint32_t helper_core_id;            /* offset 24 */
+    uint64_t signature;
+    volatile uint32_t request_pending;
+    uint32_t func_ptr;
+    uint32_t arg_eax;
+    uint32_t arg_edx;
+    uint32_t arg_ecx;
+    uint32_t result;
+    uint32_t helper_core_id;
 };
 
 /* Separately allocated stack for helper core */
@@ -62,6 +57,7 @@ static uintptr_t get_lapic_base(void)
 #define AP_TRAMPOLINE_VECTOR    0x07  /* SIPI vector = addr / 0x1000 */
 
 static struct bios_proxy_mailbox *mailbox = NULL;
+static uintptr_t mailbox_offset = 0;
 static int selected_ap_id = -1;
 
 /* Detect if running in x2APIC mode */
@@ -69,6 +65,23 @@ static int is_x2apic_mode(void)
 {
     uint64_t apic_base = rdmsr(IA32_APIC_BASE_MSR);
     return (apic_base & APIC_BASE_EXTD) != 0;
+}
+
+/*
+ * Find the BIOS proxy mailbox in the CSM binary by scanning for signature.
+ */
+static uintptr_t find_proxy_mailbox(void *csm_base, size_t csm_size)
+{
+    uint64_t *ptr = (uint64_t *)csm_base;
+    uint64_t *end = (uint64_t *)((uint8_t *)csm_base + csm_size - sizeof(struct bios_proxy_mailbox));
+
+    while (ptr < end) {
+        if (*ptr == BIOS_PROXY_SIGNATURE) {
+            return (uintptr_t)ptr - (uintptr_t)csm_base;
+        }
+        ptr++;
+    }
+    return 0;
 }
 
 /* Signature before 16-bit helper entry: "PRXY16EP" */
@@ -518,10 +531,11 @@ int bios_proxy_init(void *csm_base, size_t csm_size, void *rsdp_copy)
     saved_csm_size = csm_size;
     saved_rsdp_copy = rsdp_copy;
 
-    /* Zero out mailbox at fixed EBDA address */
-    mailbox = (struct bios_proxy_mailbox *)BIOS_PROXY_MAILBOX_ADDR;
-    memset((void *)mailbox, 0, sizeof(struct bios_proxy_mailbox));
-    printf("BIOS proxy mailbox at 0x%x (EBDA)\n", BIOS_PROXY_MAILBOX_ADDR);
+    mailbox_offset = find_proxy_mailbox(csm_base, csm_size);
+    if (!mailbox_offset) {
+        printf("BIOS proxy mailbox not found\n");
+        return -1;
+    }
 
     selected_ap_id = find_available_ap();
     if (selected_ap_id < 0) {
@@ -561,7 +575,7 @@ int bios_proxy_init(void *csm_base, size_t csm_size, void *rsdp_copy)
  */
 int bios_proxy_start_helper(uintptr_t csm_final_base)
 {
-    if (!saved_csm_base || selected_ap_id < 0) {
+    if (!mailbox_offset || !saved_csm_base || selected_ap_id < 0) {
         return -1;
     }
 
@@ -570,14 +584,14 @@ int bios_proxy_start_helper(uintptr_t csm_final_base)
         return -1;
     }
 
-    /* Mailbox is at fixed EBDA address, already set in bios_proxy_init */
+    mailbox = (struct bios_proxy_mailbox *)(csm_final_base + mailbox_offset);
 
     if (!helper_stack_buffer) {
         return -1;
     }
     uint32_t stack_top = (uint32_t)(uintptr_t)(helper_stack_buffer + HELPER_STACK_SIZE);
 
-    create_ap_trampoline(target16_addr, BIOS_PROXY_MAILBOX_ADDR, stack_top);
+    create_ap_trampoline(target16_addr, (uint32_t)(uintptr_t)mailbox, stack_top);
 
     start_ap(selected_ap_id);
 
