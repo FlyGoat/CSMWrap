@@ -122,6 +122,9 @@ BITS    16
     mov     cr4, eax
 o32 lgdt [cs:bx + (SavedGdt - .Base)]
     mov     eax, strict dword 0
+.SavedCr3End:
+    mov     cr3, eax                    ; restore page tables before enabling paging
+    mov     eax, strict dword 0
 .SavedCr0End:
     mov     cr0, eax
     mov     ax, strict word 0
@@ -136,6 +139,9 @@ _EntryPoint:
         DW      8h
 _16Idtr:
         DW      (1 << 10) - 1
+        DD      0
+_16Gdtr_zero:
+        DW      0
         DD      0
 _16Gdtr:
         DW      GdtEnd - _NullSegDesc - 1
@@ -154,17 +160,23 @@ BITS    16
     mov     es, cx
     mov     fs, cx
     mov     gs, cx
+    and     byte [edi + 5], 0xFD        ; clear TSS busy bit for next ltr
+    mov     cx, TSS_SEL
+    ltr     cx
     mov     cr0, eax                    ; real mode starts at next instruction
                                         ;  which (per SDM) *must* be a far JMP.
     jmp     0:strict word 0
 .RealAddrEnd:
     mov     cr4, ebp
+    xor     eax, eax
+    mov     cr3, eax                    ; clear stale page table pointer
     mov     ss, si                      ; set up 16-bit stack segment
     xchg    esp, ebx                    ; set up 16-bit stack pointer
     mov     bp, [esp + IA32_REGS.size]
     mov     [cs:bp + (_BackFromUserCode.SavedSsEnd - 2 - _BackFromUserCode)], dx
     mov     [cs:bp + (_BackFromUserCode.SavedEspEnd - 4 - _BackFromUserCode)], ebx
     lidt    [cs:bp + (_16Idtr - _BackFromUserCode)]
+    lgdt    [cs:bp + (_16Gdtr_zero - _BackFromUserCode)]
 
     popad
     pop     ds
@@ -191,6 +203,16 @@ _16DsDesc:
                 DB      93h
                 DB      8fh             ; 16-bit segment, 4GB limit
                 DB      0
+_TssSeg:
+                DW      0FFFFh          ; Limit (match BIOS default)
+                DW      0               ; Base 15:0
+                DB      0               ; Base 23:16
+                DB      89h             ; P=1, DPL=0, Type=9 (available TSS)
+                DB      0               ; G=0, Limit 19:16=0
+                DB      0               ; Base 31:24
+
+TSS_SEL equ _TssSeg - _NullSegDesc
+
 GdtEnd:
 
 ;------------------------------------------------------------------------------
@@ -241,6 +263,11 @@ BITS    32
     mov     ebp, cr4
     mov     [edx + (_BackFromUserCode.SavedCr4End - 4 - _BackFromUserCode.SavedCr0End)], ebp
     xor     ebp, ebp                    ; zero out CR4
+    push    eax                          ; save CR0 value (0x10)
+    mov     eax, cr3
+    mov     [edx + (_BackFromUserCode.SavedCr3End - 4 - _BackFromUserCode.SavedCr0End)], eax
+    pop     eax                          ; restore CR0 value
+    lea     edi, [edx + (_TssSeg - _BackFromUserCode.SavedCr0End)]
     push    10h
     pop     ecx                         ; ecx <- selector for data segments
     lgdt    [edx + (_16Gdtr - _BackFromUserCode.SavedCr0End)]

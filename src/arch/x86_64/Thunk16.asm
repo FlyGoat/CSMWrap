@@ -131,6 +131,9 @@ o32 lgdt [cs:bx + (SavedGdt - .Base)]
 .SavedEFERHighEnd:
     wrmsr
     mov     eax, strict dword 0
+.SavedCr3End:
+    mov     cr3, eax                    ; restore page tables before enabling paging
+    mov     eax, strict dword 0
 .SavedCr0End:
     mov     cr0, eax
     jmp     0:strict dword 0
@@ -152,6 +155,9 @@ _16GdtrBase:
 _16Idtr:
         DW      (1 << 10) - 1
         DD      0
+_16Gdtr_zero:
+        DW      0
+        DD      0
 
 ;------------------------------------------------------------------------------
 ; _ToUserCode() takes control in real mode before passing control to user code.
@@ -164,9 +170,13 @@ BITS    16
     mov     es, dx
     mov     fs, dx
     mov     gs, dx
+    and     byte [edi + 5], 0xFD        ; clear TSS busy bit for next ltr
+    mov     cx, TSS_SEL
+    ltr     cx
     mov     ecx, 0c0000080h
     mov     cr0, eax                    ; real mode starts at next instruction
     xor     eax, eax
+    mov     cr3, eax                    ; clear stale page table pointer
     xor     edx, edx
     wrmsr
     mov     cr4, ebp
@@ -182,6 +192,7 @@ BITS    16
 .RealMode:
 
 o32 lidt    [cs:bp + (_16Idtr - .Base)]
+o32 lgdt    [cs:bp + (_16Gdtr_zero - .Base)]
 
     popad
     pop     ds
@@ -221,6 +232,17 @@ _32Data:
             DB      93h
             DB      0cfh                ; 16-bit segment, 4GB limit
             DB      0
+_TssSeg:
+            DW      0FFFFh              ; Limit (match BIOS default)
+            DW      0                   ; Base 15:0
+            DB      0                   ; Base 23:16
+            DB      89h                 ; P=1, DPL=0, Type=9 (available TSS)
+            DB      0                   ; G=0, Limit 19:16=0
+            DB      0                   ; Base 31:24
+            DD      0                   ; Base 63:32 (64-bit TSS descriptor
+            DD      0                   ;  requires 16 bytes in long mode)
+
+TSS_SEL equ _TssSeg - _NullSeg
 
 GDT_SIZE equ $ - _NullSeg
 
@@ -302,6 +324,11 @@ BITS    64
     mov     rbp, cr4
     mov     [rcx - 4], ebp              ; save CR4 in _BackFromUserCode.SavedCr4End - 4
     xor     ebp, ebp                    ; zero out CR4
+    push    rax                          ; save CR0 value (0x10)
+    mov     rax, cr3
+    mov     [rcx + (_BackFromUserCode.SavedCr3End - 4 - _BackFromUserCode.SavedCr4End)], eax
+    pop     rax                          ; restore CR0 value
+    lea     edi, [rcx + (_TssSeg - _BackFromUserCode.SavedCr4End)]
     mov     esi, r8d                    ; esi <- 16-bit stack segment
     push    DATA32
     pop     rdx                         ; rdx <- 32-bit data segment selector
