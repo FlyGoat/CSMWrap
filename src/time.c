@@ -64,5 +64,5 @@ void delay(uint64_t cycles) {
 }
 
 void delay_us(uint64_t us) {
-    delay(tsc_freq / 1000000 * us);
+    delay((tsc_freq * us + 999999) / 1000000);
 }
