@@ -25,14 +25,6 @@ static uint64_t tsc_freq_from_cpuid(void) {
         }
     }
 
-    /* CPUID leaf 0x16: Processor base frequency in MHz */
-    if (max_leaf >= 0x16) {
-        asm volatile("cpuid" : "=a"(eax), "=b"(ebx), "=c"(ecx), "=d"(edx) : "a"(0x16), "c"(0));
-        if (eax != 0) {
-            return (uint64_t)eax * 1000000;
-        }
-    }
-
     return 0;
 }
 
