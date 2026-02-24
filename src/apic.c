@@ -35,13 +35,27 @@
 
 /* x2APIC MSR addresses (base 0x800, offset = xAPIC offset >> 4) */
 #define X2APIC_MSR_SIVR                 0x80F  /* Spurious Interrupt Vector (0xF0 >> 4) */
+#define X2APIC_MSR_LVT_CMCI             0x82F  /* LVT CMCI (0x2F0 >> 4) */
+#define X2APIC_MSR_LVT_TIMER            0x832  /* LVT Timer (0x320 >> 4) */
+#define X2APIC_MSR_LVT_THERMAL          0x833  /* LVT Thermal (0x330 >> 4) */
+#define X2APIC_MSR_LVT_PMC              0x834  /* LVT PMC (0x340 >> 4) */
 #define X2APIC_MSR_LVT_LINT0            0x835  /* LVT LINT0 (0x350 >> 4) */
 #define X2APIC_MSR_LVT_LINT1            0x836  /* LVT LINT1 (0x360 >> 4) */
+#define X2APIC_MSR_LVT_ERROR            0x837  /* LVT Error (0x370 >> 4) */
+#define X2APIC_MSR_VERSION              0x803  /* Version (0x030 >> 4) */
+#define X2APIC_MSR_TPR                  0x808  /* Task Priority (0x080 >> 4) */
 
 /* xAPIC MMIO offsets (from APIC base, typically 0xFEE00000) */
+#define XAPIC_VERSION_OFFSET            0x030
+#define XAPIC_TPR_OFFSET                0x080
 #define XAPIC_SIVR_OFFSET               0x0F0
+#define XAPIC_LVT_CMCI_OFFSET          0x2F0
+#define XAPIC_LVT_TIMER_OFFSET         0x320
+#define XAPIC_LVT_THERMAL_OFFSET       0x330
+#define XAPIC_LVT_PMC_OFFSET           0x340
 #define XAPIC_LVT_LINT0_OFFSET          0x350
 #define XAPIC_LVT_LINT1_OFFSET          0x360
+#define XAPIC_LVT_ERROR_OFFSET         0x370
 
 /* LVT register bits */
 #define LVT_VECTOR_MASK                 0xFF
@@ -89,6 +103,19 @@ static bool x2apic_is_locked(void)
     return !!(xapic_status & XAPIC_DISABLE_LEGACY_DISABLED);
 }
 
+static bool lvt_should_mask(uint32_t lvt)
+{
+    switch ((lvt >> LVT_DELIVERY_MODE_SHIFT) & 7) {
+        case 0b000: /* Fixed */
+        case 0b001: /* Lowest Priority */
+        case 0b100: /* NMI */
+        case 0b111: /* ExtINT */
+            return true;
+        default:    /* SMI, INIT, Reserved */
+            return false;
+    }
+}
+
 /*
  * Configure LAPIC for legacy BIOS operation in x2APIC mode (MSR access).
  * Sets up LINT0 for ExtINT, LINT1 for NMI per Intel SDM Appendix D.
@@ -100,6 +127,37 @@ static bool x2apic_is_locked(void)
 static void x2apic_configure_for_legacy(void)
 {
     uint64_t val;
+    uint32_t max_lvt = ((uint32_t)rdmsr(X2APIC_MSR_VERSION) >> 16) & 0xFF;
+
+    /* Clear task priority to allow all interrupts */
+    wrmsr(X2APIC_MSR_TPR, 0);
+
+    /* Mask stale LVT entries to prevent unexpected interrupts.
+     * Only mask entries with Fixed, Lowest Priority, NMI, or ExtINT delivery
+     * mode. Leave SMI, INIT, and reserved delivery modes untouched as firmware
+     * may rely on them (e.g. thermal management via SMI). */
+    uint64_t lvt;
+    lvt = rdmsr(X2APIC_MSR_LVT_TIMER);
+    if (lvt_should_mask(lvt))
+        wrmsr(X2APIC_MSR_LVT_TIMER, lvt | LVT_MASK);
+    lvt = rdmsr(X2APIC_MSR_LVT_ERROR);
+    if (lvt_should_mask(lvt))
+        wrmsr(X2APIC_MSR_LVT_ERROR, lvt | LVT_MASK);
+    if (max_lvt >= 4) {
+        lvt = rdmsr(X2APIC_MSR_LVT_PMC);
+        if (lvt_should_mask(lvt))
+            wrmsr(X2APIC_MSR_LVT_PMC, lvt | LVT_MASK);
+    }
+    if (max_lvt >= 5) {
+        lvt = rdmsr(X2APIC_MSR_LVT_THERMAL);
+        if (lvt_should_mask(lvt))
+            wrmsr(X2APIC_MSR_LVT_THERMAL, lvt | LVT_MASK);
+    }
+    if (max_lvt >= 6) {
+        lvt = rdmsr(X2APIC_MSR_LVT_CMCI);
+        if (lvt_should_mask(lvt))
+            wrmsr(X2APIC_MSR_LVT_CMCI, lvt | LVT_MASK);
+    }
 
     /* Configure LINT0 for ExtINT (Intel SDM example: 0x00000700):
      * - Delivery mode = ExtINT (7)
@@ -155,6 +213,37 @@ static void xapic_configure_for_legacy(uintptr_t apic_base)
     volatile uint32_t *lint1_reg = (volatile uint32_t *)(apic_base + XAPIC_LVT_LINT1_OFFSET);
     volatile uint32_t *sivr_reg = (volatile uint32_t *)(apic_base + XAPIC_SIVR_OFFSET);
     uint32_t val;
+    uint32_t max_lvt = (*(volatile uint32_t *)(apic_base + XAPIC_VERSION_OFFSET) >> 16) & 0xFF;
+
+    /* Clear task priority to allow all interrupts */
+    *(volatile uint32_t *)(apic_base + XAPIC_TPR_OFFSET) = 0;
+
+    /* Mask stale LVT entries to prevent unexpected interrupts.
+     * Only mask entries with Fixed, Lowest Priority, NMI, or ExtINT delivery
+     * mode. Leave SMI, INIT, and reserved delivery modes untouched as firmware
+     * may rely on them (e.g. thermal management via SMI). */
+    uint32_t lvt;
+    lvt = *(volatile uint32_t *)(apic_base + XAPIC_LVT_TIMER_OFFSET);
+    if (lvt_should_mask(lvt))
+        *(volatile uint32_t *)(apic_base + XAPIC_LVT_TIMER_OFFSET) = lvt | LVT_MASK;
+    lvt = *(volatile uint32_t *)(apic_base + XAPIC_LVT_ERROR_OFFSET);
+    if (lvt_should_mask(lvt))
+        *(volatile uint32_t *)(apic_base + XAPIC_LVT_ERROR_OFFSET) = lvt | LVT_MASK;
+    if (max_lvt >= 4) {
+        lvt = *(volatile uint32_t *)(apic_base + XAPIC_LVT_PMC_OFFSET);
+        if (lvt_should_mask(lvt))
+            *(volatile uint32_t *)(apic_base + XAPIC_LVT_PMC_OFFSET) = lvt | LVT_MASK;
+    }
+    if (max_lvt >= 5) {
+        lvt = *(volatile uint32_t *)(apic_base + XAPIC_LVT_THERMAL_OFFSET);
+        if (lvt_should_mask(lvt))
+            *(volatile uint32_t *)(apic_base + XAPIC_LVT_THERMAL_OFFSET) = lvt | LVT_MASK;
+    }
+    if (max_lvt >= 6) {
+        lvt = *(volatile uint32_t *)(apic_base + XAPIC_LVT_CMCI_OFFSET);
+        if (lvt_should_mask(lvt))
+            *(volatile uint32_t *)(apic_base + XAPIC_LVT_CMCI_OFFSET) = lvt | LVT_MASK;
+    }
 
     /* Configure LINT0 for ExtINT (Intel SDM example: 0x00000700) */
     val = *lint0_reg;
