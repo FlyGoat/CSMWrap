@@ -47,14 +47,12 @@ void calibrate_tsc(void) {
 }
 
 uint64_t get_nanoseconds_since_boot(void) {
-    uint64_t elapsed = rdtsc() - tsc_boot;
-    /* Convert to nanoseconds: elapsed * 1e9 / tsc_freq
-     * Use MHz intermediate to avoid overflow and division by zero
-     * when tsc_freq < 1GHz (integer division of tsc_freq/1e9 yields 0) */
-    uint64_t tsc_mhz = tsc_freq / 1000000ULL;
-    if (tsc_mhz == 0)
+    if (tsc_freq == 0)
         return 0;
-    return elapsed / tsc_mhz * 1000;
+    uint64_t elapsed = rdtsc() - tsc_boot;
+    uint64_t usec = elapsed / tsc_freq * 1000000
+                  + elapsed % tsc_freq * 1000000 / tsc_freq;
+    return usec * 1000;
 }
 
 void delay(uint64_t cycles) {
