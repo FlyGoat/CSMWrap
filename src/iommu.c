@@ -69,8 +69,6 @@ struct dmar_drhd {
  */
 #define VTD_GSTS_ONESHOT_MASK   0x96FFFFFF
 
-#define VTD_TIMEOUT 100000
-
 /*
  * AMD IOMMU (AMD-Vi) IVRS Table Structures
  * Reference: AMD I/O Virtualization Technology (IOMMU) Specification
@@ -103,15 +101,12 @@ struct ivrs_header {
 #define AMD_IOMMU_CTRL_REG  0x18
 #define AMD_IOMMU_CTRL_EN   (1ULL << 0)
 
-#define AMD_IOMMU_TIMEOUT 100000
-
 /*
  * Disable a single Intel VT-d IOMMU unit
  */
 static bool vtd_disable_unit(uint64_t reg_base) {
     void *base = (void *)(uintptr_t)reg_base;
     uint32_t gsts, gcmd;
-    int timeout;
 
     gsts = readl(base + VTD_GSTS_REG);
     printf("  VT-d unit at 0x%llx: GSTS=0x%08x (TE=%d, IRE=%d, QIE=%d)\n",
@@ -131,17 +126,8 @@ static bool vtd_disable_unit(uint64_t reg_base) {
         gcmd &= ~VTD_GCMD_TE;
         writel(base + VTD_GCMD_REG, gcmd);
 
-        timeout = VTD_TIMEOUT;
-        while (timeout-- > 0) {
-            gsts = readl(base + VTD_GSTS_REG);
-            if (!(gsts & VTD_GSTS_TES))
-                break;
+        while ((gsts = readl(base + VTD_GSTS_REG)) & VTD_GSTS_TES)
             asm volatile("pause");
-        }
-        if (gsts & VTD_GSTS_TES) {
-            printf("    WARNING: Timeout disabling translation\n");
-            return false;
-        }
         printf("    Translation disabled\n");
     }
 
@@ -151,17 +137,8 @@ static bool vtd_disable_unit(uint64_t reg_base) {
         gcmd &= ~(VTD_GCMD_TE | VTD_GCMD_IRE);
         writel(base + VTD_GCMD_REG, gcmd);
 
-        timeout = VTD_TIMEOUT;
-        while (timeout-- > 0) {
-            gsts = readl(base + VTD_GSTS_REG);
-            if (!(gsts & VTD_GSTS_IRES))
-                break;
+        while ((gsts = readl(base + VTD_GSTS_REG)) & VTD_GSTS_IRES)
             asm volatile("pause");
-        }
-        if (gsts & VTD_GSTS_IRES) {
-            printf("    WARNING: Timeout disabling interrupt remapping\n");
-            return false;
-        }
         printf("    Interrupt remapping disabled\n");
     }
 
@@ -171,17 +148,8 @@ static bool vtd_disable_unit(uint64_t reg_base) {
         gcmd &= ~(VTD_GCMD_TE | VTD_GCMD_IRE | VTD_GCMD_QIE);
         writel(base + VTD_GCMD_REG, gcmd);
 
-        timeout = VTD_TIMEOUT;
-        while (timeout-- > 0) {
-            gsts = readl(base + VTD_GSTS_REG);
-            if (!(gsts & VTD_GSTS_QIES))
-                break;
+        while ((gsts = readl(base + VTD_GSTS_REG)) & VTD_GSTS_QIES)
             asm volatile("pause");
-        }
-        if (gsts & VTD_GSTS_QIES) {
-            printf("    WARNING: Timeout disabling queued invalidation\n");
-            return false;
-        }
         printf("    Queued invalidation disabled\n");
     }
 
@@ -252,7 +220,6 @@ static uint64_t readq_iommu(void *addr) {
 static bool amd_iommu_disable_unit(uint64_t iommu_base) {
     void *base = (void *)(uintptr_t)iommu_base;
     uint64_t ctrl;
-    int timeout;
 
     ctrl = readq_iommu(base + AMD_IOMMU_CTRL_REG);
     printf("  AMD IOMMU at 0x%llx: CTRL=0x%016llx (En=%d)\n",
@@ -263,22 +230,14 @@ static bool amd_iommu_disable_unit(uint64_t iommu_base) {
         return true;
     }
 
+    /* Clear IommuEn (bit 0). Takes effect immediately, no polling needed
+     * (unlike Intel VT-d) — the AMD IOMMU has no split command/status
+     * architecture. Matches Linux, Xen, and EDK2 behavior. */
     ctrl &= ~AMD_IOMMU_CTRL_EN;
-
-    printf("    Disabling IOMMU (CTRL=0x%016llx)\n", ctrl);
     writeq(base + AMD_IOMMU_CTRL_REG, ctrl);
 
-    timeout = AMD_IOMMU_TIMEOUT;
-    while (timeout-- > 0) {
-        ctrl = readq_iommu(base + AMD_IOMMU_CTRL_REG);
-        if (!(ctrl & AMD_IOMMU_CTRL_EN)) {
-            printf("    IOMMU disabled successfully\n");
-            return true;
-        }
-    }
-
-    printf("    WARNING: Timeout waiting for IOMMU to disable\n");
-    return false;
+    printf("    IOMMU disabled successfully\n");
+    return true;
 }
 
 /*

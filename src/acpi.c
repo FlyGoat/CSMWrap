@@ -171,6 +171,16 @@ uacpi_status uacpi_kernel_io_write32(uacpi_handle handle, uacpi_size offset, uac
     return UACPI_STATUS_OK;
 }
 
+uacpi_interrupt_state uacpi_kernel_disable_interrupts(void) {
+    uacpi_interrupt_state flags;
+    asm volatile ("pushf; pop %0; cli" : "=rm"(flags) :: "memory");
+    return flags;
+}
+
+void uacpi_kernel_restore_interrupts(uacpi_interrupt_state state) {
+    asm volatile ("push %0; popf" :: "rm"(state) : "memory", "cc");
+}
+
 uacpi_handle uacpi_kernel_create_spinlock(void) {
     void *handle;
     if (gBS->AllocatePool(EfiLoaderData, 0x1, &handle) != EFI_SUCCESS) {
