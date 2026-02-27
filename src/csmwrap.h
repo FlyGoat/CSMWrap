@@ -7,6 +7,7 @@
 #include <edk2/Coreboot.h>
 #include <edk2/E820.h>
 #include <edk2/Pci.h>
+#include <stdbool.h>
 #include <libc.h>
 #include <x86thunk.h>
 
@@ -14,6 +15,7 @@ extern EFI_SYSTEM_TABLE *gST;
 extern EFI_BOOT_SERVICES *gBS;
 extern EFI_RUNTIME_SERVICES *gRT;
 extern EFI_TIME gTimeAtBoot;
+extern bool gBootServicesExited;
 
 enum csmwrap_video_type {
     CSMWRAP_VIDEO_NONE,

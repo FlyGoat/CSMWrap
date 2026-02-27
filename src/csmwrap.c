@@ -13,6 +13,7 @@
 #include <time.h>
 #include <bios_proxy.h>
 #include <mptable.h>
+#include <config.h>
 #include <flanterm.h>
 #include <flanterm_backends/fb.h>
 
@@ -32,6 +33,7 @@ EFI_SYSTEM_TABLE *gST;
 EFI_BOOT_SERVICES *gBS;
 EFI_RUNTIME_SERVICES *gRT;
 EFI_TIME gTimeAtBoot;
+bool gBootServicesExited = false;
 
 struct csmwrap_priv priv = {
     .csm_bin = Csm16_bin,
@@ -475,6 +477,7 @@ int set_smbios_table()
 
 void __attribute__((noreturn)) panic(const char *fmt, ...)
 {
+    gConfig.verbose = true;
     printf("\n*** PANIC: ");
     va_list l;
     va_start(l, fmt);
@@ -499,6 +502,7 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
 
     csmwrap_video_early_init(&priv);
 
+    /* Initialise Flanterm (output gated on verbose; panics always show) */
     if (priv.cb_fb.physical_address != 0) {
         flanterm_ctx = flanterm_fb_init(
             flanterm_uefi_malloc, flanterm_uefi_free,
@@ -512,7 +516,10 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
 
     gBS->SetWatchdogTimer(0, 0, 0, NULL);
 
+    /* Banner is always shown on screen */
+    gConfig.verbose = true;
     printf("%s", banner);
+    gConfig.verbose = false;
 
     for (EFI_PHYSICAL_ADDRESS i = 0; i < 0x100000; i += EFI_PAGE_SIZE) {
         EFI_PHYSICAL_ADDRESS j = i;
@@ -544,15 +551,21 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
         sfs_dir = NULL;
     }
 
+    /* Load configuration from csmwrap.ini next to our executable */
+    if (sfs_dir != NULL && loaded_image != NULL) {
+        config_load(sfs_dir, loaded_image->FilePath);
+    }
+
+    /* Load custom VGABIOS from config path if specified */
     EFI_FILE_PROTOCOL *vgabios_file_handle = NULL;
-    if (sfs_dir != NULL) {
-        if (sfs_dir->Open(sfs_dir, &vgabios_file_handle, L"\\EFI\\CSMWrap\\vgabios.bin", EFI_FILE_MODE_READ, 0) == EFI_SUCCESS) {
+    if (sfs_dir != NULL && gConfig.vgabios_path[0] != 0) {
+        if (sfs_dir->Open(sfs_dir, &vgabios_file_handle, gConfig.vgabios_path, EFI_FILE_MODE_READ, 0) == EFI_SUCCESS) {
             UINTN max_size = 256 * 1024;
             if (gBS->AllocatePool(EfiLoaderData, max_size, &vbios_loc) != EFI_SUCCESS) {
                 vbios_loc = NULL;
             } else {
                 if (vgabios_file_handle->Read(vgabios_file_handle, &max_size, vbios_loc) == EFI_SUCCESS) {
-                    printf("Found and loaded '\\EFI\\CSMWrap\\vgabios.bin' file. Using it as our VBIOS!\n");
+                    printf("Loaded custom VBIOS from config. Using it as our VBIOS!\n");
                     vbios_size = max_size;
                 } else {
                     gBS->FreePool(vbios_loc);
@@ -560,7 +573,12 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
                 }
             }
             vgabios_file_handle->Close(vgabios_file_handle);
+        } else {
+            printf("warning: could not open configured vgabios path\n");
         }
+    }
+
+    if (sfs_dir != NULL) {
         sfs_dir->Close(sfs_dir);
     }
 
@@ -668,14 +686,15 @@ retry:
         goto retry;
     }
 
-    /* Invalidate boot services console output - protocol is no longer usable */
-    gST->ConOut = NULL;
+    /* Boot services protocols (including serial I/O) are no longer usable */
+    gBootServicesExited = true;
 
     /* Disable external interrupts */
     asm volatile ("cli");
 
     /* Disable IOMMUs before PCI relocation and CSM init */
-    iommu_disable();
+    if (gConfig.iommu_disable)
+        iommu_disable();
 
     /* Prepare APIC for legacy BIOS operation (disable or configure for ExtINT) */
     apic_prepare_for_legacy();
