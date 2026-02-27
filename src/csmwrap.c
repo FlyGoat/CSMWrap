@@ -33,6 +33,7 @@ EFI_SYSTEM_TABLE *gST;
 EFI_BOOT_SERVICES *gBS;
 EFI_RUNTIME_SERVICES *gRT;
 EFI_TIME gTimeAtBoot;
+bool gBootServicesExited = false;
 
 struct csmwrap_priv priv = {
     .csm_bin = Csm16_bin,
@@ -680,8 +681,8 @@ retry:
         goto retry;
     }
 
-    /* Invalidate boot services console output - protocol is no longer usable */
-    gST->ConOut = NULL;
+    /* Boot services protocols (including serial I/O) are no longer usable */
+    gBootServicesExited = true;
 
     /* Disable external interrupts */
     asm volatile ("cli");
