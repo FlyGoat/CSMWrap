@@ -433,6 +433,8 @@ static void sort_bars(struct pci_bus *bus) {
 
 static void reallocate_bars(struct pci_bus *bus);
 
+static bool fb_relocated = false;
+
 static void reallocate_single_bar(struct pci_bus *bus, struct pci_bar *bar) {
     bool tried_all_prefetchable = false;
 
@@ -490,14 +492,19 @@ again:
                bar->bar_number, bus->segment, bus->bus, bar->device->slot, bar->device->function,
                orig_base, bar->base);
 
-        // Update framebuffer address if it falls within this BAR/window
-        if (priv.cb_fb.physical_address >= orig_base
+        // Track framebuffer through BAR relocation. Must only match once:
+        // a bridge has separate prefetchable and non-prefetchable windows that
+        // can alias after relocation, causing a double-adjustment to a wrong
+        // address (e.g. GPU MMIO instead of VRAM), corrupting GPU state.
+        if (!fb_relocated
+         && priv.cb_fb.physical_address >= orig_base
          && priv.cb_fb.physical_address < orig_base + bar->length) {
             printf("BAR contains the EFI framebuffer. Modifying cb_fb.physical_address accordingly...\n");
             printf("  0x%llx => ", priv.cb_fb.physical_address);
             priv.cb_fb.physical_address -= orig_base;
             priv.cb_fb.physical_address += bar->base;
             printf("0x%llx\n", priv.cb_fb.physical_address);
+            fb_relocated = true;
         }
 
         // Disable memory decode while updating BAR to prevent device from
