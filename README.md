@@ -99,15 +99,18 @@ so this is mostly a non-issue.
 ### Does CSMWrap have any advantages over native CSM?
 
 Yes! Native CSM firmware is often riddled with issues and hardly tested against legacy OSes anymore. CSMWrap ships a reliable, free, and open-source
-legacy BIOS implementation, SeaBIOS, and it is tested against legacy OSes. Issues affecting modern, commonly shipped CSM implementations do
+legacy BIOS implementation - SeaBIOS - and it is tested against legacy OSes. Issues affecting modern, commonly shipped CSM implementations do
 not affect CSMWrap, like for example:
 
 - Dirty control register values at handoff. (This is something that [cregfix](https://github.com/mintsuki/cregfix) was created to work around).
 - Legacy BIOS routines failing to reliably run when called from Virtual 8086 Mode. EMM386, Windows 3.x under 386 enhanced mode, and more, are affected
   by this issue and it results in crashes. The reason for this is a bit technical for this README file, but CSMWrap is not affected.
 
-Additionally, CSMWrap allows one to select a non-primary video card for VGA output which native CSM implementations do not allow. This is useful for
-multi-booting modern and legacy OSes.
+And when it comes to improvements that are not necessarily bugs in CSM implementations, CSMWrap, amongst other things:
+
+- Generates MP tables for legacy OSes that support the legacy Intel MultiProcessor Specification standard but not ACPI.
+- Allows one to select a non-primary video card for VGA output which native CSM implementations do not allow. This is useful for
+  multi-booting modern and legacy OSes.
 
 ## Documentation
 
