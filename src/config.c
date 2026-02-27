@@ -1,0 +1,335 @@
+#include <stddef.h>
+#include <stdbool.h>
+#include <stdint.h>
+
+#include <efi.h>
+#include <csmwrap.h>
+#include <config.h>
+#include <printf.h>
+
+struct csmwrap_config gConfig = {
+    .serial_debug = false,
+    .serial_port = 0x3f8,
+    .serial_baud = 115200,
+    .vgabios_path = {0},
+    .iommu_disable = true,
+};
+
+static bool char_eq_nocase(char a, char b)
+{
+    if (a >= 'A' && a <= 'Z') a += 'a' - 'A';
+    if (b >= 'A' && b <= 'Z') b += 'a' - 'A';
+    return a == b;
+}
+
+static bool streq_nocase(const char *a, const char *b)
+{
+    while (*a && *b) {
+        if (!char_eq_nocase(*a, *b))
+            return false;
+        a++;
+        b++;
+    }
+    return *a == *b;
+}
+
+static bool parse_bool(const char *val, bool *out)
+{
+    if (streq_nocase(val, "true") || streq_nocase(val, "yes") || streq_nocase(val, "1")) {
+        *out = true;
+        return true;
+    }
+    if (streq_nocase(val, "false") || streq_nocase(val, "no") || streq_nocase(val, "0")) {
+        *out = false;
+        return true;
+    }
+    return false;
+}
+
+static bool parse_uint32(const char *val, uint32_t *out)
+{
+    uint32_t result = 0;
+    bool hex = false;
+
+    if (val[0] == '0' && (val[1] == 'x' || val[1] == 'X')) {
+        hex = true;
+        val += 2;
+    }
+
+    if (*val == '\0')
+        return false;
+
+    while (*val) {
+        char c = *val;
+        uint32_t digit;
+        if (c >= '0' && c <= '9') {
+            digit = c - '0';
+        } else if (hex && c >= 'a' && c <= 'f') {
+            digit = 10 + c - 'a';
+        } else if (hex && c >= 'A' && c <= 'F') {
+            digit = 10 + c - 'A';
+        } else {
+            return false;
+        }
+        result = result * (hex ? 16 : 10) + digit;
+        val++;
+    }
+
+    *out = result;
+    return true;
+}
+
+static const char *skip_whitespace(const char *s)
+{
+    while (*s == ' ' || *s == '\t')
+        s++;
+    return s;
+}
+
+static size_t trim_trailing(const char *start, size_t len)
+{
+    while (len > 0 && (start[len - 1] == ' ' || start[len - 1] == '\t' ||
+                       start[len - 1] == '\r' || start[len - 1] == '\n'))
+        len--;
+    return len;
+}
+
+/*
+ * Parse a single key=value line and apply it to gConfig.
+ * key and val are null-terminated, trimmed strings.
+ */
+static void config_apply(const char *key, const char *val)
+{
+    if (streq_nocase(key, "serial")) {
+        bool v;
+        if (parse_bool(val, &v)) {
+            gConfig.serial_debug = v;
+            printf("  serial = %s\n", v ? "true" : "false");
+        } else {
+            printf("  warning: invalid value for 'serial': %s\n", val);
+        }
+    } else if (streq_nocase(key, "serial_port")) {
+        uint32_t v;
+        if (parse_uint32(val, &v) && v <= 0xFFFF) {
+            gConfig.serial_port = (uint16_t)v;
+            printf("  serial_port = 0x%x\n", gConfig.serial_port);
+        } else {
+            printf("  warning: invalid value for 'serial_port': %s\n", val);
+        }
+    } else if (streq_nocase(key, "serial_baud")) {
+        uint32_t v;
+        if (parse_uint32(val, &v) && v > 0) {
+            gConfig.serial_baud = v;
+            printf("  serial_baud = %u\n", gConfig.serial_baud);
+        } else {
+            printf("  warning: invalid value for 'serial_baud': %s\n", val);
+        }
+    } else if (streq_nocase(key, "vgabios")) {
+        /* Convert ASCII path to CHAR16 */
+        size_t i;
+        for (i = 0; val[i] && i < CONFIG_VGABIOS_PATH_MAX - 1; i++)
+            gConfig.vgabios_path[i] = (CHAR16)(unsigned char)val[i];
+        gConfig.vgabios_path[i] = 0;
+        printf("  vgabios = %s\n", val);
+    } else if (streq_nocase(key, "iommu_disable")) {
+        bool v;
+        if (parse_bool(val, &v)) {
+            gConfig.iommu_disable = v;
+            printf("  iommu_disable = %s\n", v ? "true" : "false");
+        } else {
+            printf("  warning: invalid value for 'iommu_disable': %s\n", val);
+        }
+    } else {
+        printf("  warning: unknown config key '%s'\n", key);
+    }
+}
+
+/*
+ * Parse an INI-style buffer (flat key=value, no sections).
+ */
+static void config_parse(char *buf, size_t len)
+{
+    char *line = buf;
+    char *end = buf + len;
+
+    while (line < end) {
+        /* Find end of line */
+        char *eol = line;
+        while (eol < end && *eol != '\n')
+            eol++;
+
+        /* Null-terminate the line */
+        if (eol < end)
+            *eol = '\0';
+
+        const char *p = skip_whitespace(line);
+
+        /* Skip empty lines and comments */
+        if (*p == '\0' || *p == ';' || *p == '#') {
+            line = eol + 1;
+            continue;
+        }
+
+        /* Find '=' separator */
+        const char *eq = p;
+        while (*eq && *eq != '=')
+            eq++;
+
+        if (*eq != '=') {
+            printf("  warning: malformed line (no '='): %s\n", p);
+            line = eol + 1;
+            continue;
+        }
+
+        /* Extract key: from p to eq, trimmed */
+        size_t key_len = trim_trailing(p, (size_t)(eq - p));
+        if (key_len == 0) {
+            line = eol + 1;
+            continue;
+        }
+
+        /* Null-terminate key in place */
+        char *key_start = (char *)p;
+        key_start[key_len] = '\0';
+
+        /* Extract value: after '=', trimmed */
+        const char *val_start = skip_whitespace(eq + 1);
+        size_t val_len = trim_trailing(val_start, eol - val_start);
+
+        /* Null-terminate value in place */
+        char *val_mut = (char *)val_start;
+        val_mut[val_len] = '\0';
+
+        config_apply(key_start, val_mut);
+
+        line = eol + 1;
+    }
+}
+
+/*
+ * Build the config file path by finding the directory of the running
+ * EFI executable from its device path and appending "csmwrap.ini".
+ */
+static bool config_build_path(EFI_DEVICE_PATH_PROTOCOL *file_path,
+                              CHAR16 *out, size_t out_chars)
+{
+    if (!file_path)
+        return false;
+
+    /* Reconstruct the file path string from FILEPATH_DEVICE_PATH nodes */
+    size_t pos = 0;
+    out[0] = 0;
+
+    EFI_DEVICE_PATH_PROTOCOL *node;
+    for (node = file_path; !IsDevicePathEnd(node); node = NextDevicePathNode(node)) {
+        if (DevicePathType(node) == MEDIA_DEVICE_PATH &&
+            DevicePathSubType(node) == MEDIA_FILEPATH_DP) {
+            FILEPATH_DEVICE_PATH *fp = (FILEPATH_DEVICE_PATH *)node;
+            CHAR16 *src = fp->PathName;
+            while (*src && pos < out_chars - 1) {
+                out[pos++] = *src++;
+            }
+        }
+    }
+    out[pos] = 0;
+
+    if (pos == 0)
+        return false;
+
+    /* Find the last backslash to strip the filename */
+    size_t last_sep = 0;
+    bool found_sep = false;
+    for (size_t i = 0; i < pos; i++) {
+        if (out[i] == L'\\' || out[i] == L'/') {
+            last_sep = i;
+            found_sep = true;
+        }
+    }
+
+    size_t dir_end;
+    if (found_sep) {
+        dir_end = last_sep + 1; /* keep the trailing backslash */
+    } else {
+        /* No separator - file is at root, prepend backslash */
+        dir_end = 0;
+        if (pos + 1 < out_chars) {
+            out[0] = L'\\';
+            dir_end = 1;
+        }
+    }
+
+    /* Append "csmwrap.ini" */
+    static const CHAR16 ini_name[] = L"csmwrap.ini";
+    size_t name_len = sizeof(ini_name) / sizeof(CHAR16) - 1;
+    if (dir_end + name_len >= out_chars)
+        return false;
+
+    for (size_t i = 0; i <= name_len; i++)
+        out[dir_end + i] = ini_name[i];
+
+    return true;
+}
+
+void config_load(EFI_FILE_PROTOCOL *root_dir, EFI_DEVICE_PATH_PROTOCOL *file_path)
+{
+    if (!root_dir || !file_path)
+        return;
+
+    CHAR16 path[512];
+    if (!config_build_path(file_path, path, ARRAY_SIZE(path))) {
+        printf("Config: could not determine executable directory\n");
+        return;
+    }
+
+    EFI_FILE_PROTOCOL *file = NULL;
+    EFI_STATUS status = root_dir->Open(root_dir, &file, path, EFI_FILE_MODE_READ, 0);
+    if (status != EFI_SUCCESS) {
+        /* Not an error - config file is optional */
+        return;
+    }
+
+    /* Get file size via EFI_FILE_INFO */
+    EFI_GUID fi_guid = EFI_FILE_INFO_ID;
+    UINTN info_size = 0;
+    file->GetInfo(file, &fi_guid, &info_size, NULL);
+
+    void *info_buf = NULL;
+    if (gBS->AllocatePool(EfiLoaderData, info_size, &info_buf) != EFI_SUCCESS) {
+        file->Close(file);
+        return;
+    }
+
+    UINTN file_size = 0;
+    if (file->GetInfo(file, &fi_guid, &info_size, info_buf) == EFI_SUCCESS) {
+        EFI_FILE_INFO *fi = info_buf;
+        file_size = (UINTN)fi->FileSize;
+    }
+    gBS->FreePool(info_buf);
+
+    if (file_size == 0 || file_size > 64 * 1024) {
+        printf("Config: file empty or too large (%lu bytes)\n", (unsigned long)file_size);
+        file->Close(file);
+        return;
+    }
+
+    /* Read file contents */
+    char *buf = NULL;
+    if (gBS->AllocatePool(EfiLoaderData, file_size + 1, (void **)&buf) != EFI_SUCCESS) {
+        file->Close(file);
+        return;
+    }
+
+    UINTN read_size = file_size;
+    if (file->Read(file, &read_size, buf) != EFI_SUCCESS) {
+        gBS->FreePool(buf);
+        file->Close(file);
+        return;
+    }
+    buf[read_size] = '\0';
+    file->Close(file);
+
+    printf("Config: loaded csmwrap.ini (%lu bytes)\n", (unsigned long)read_size);
+    config_parse(buf, read_size);
+
+    gBS->FreePool(buf);
+}

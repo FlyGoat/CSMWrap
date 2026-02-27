@@ -40,6 +40,33 @@ SeaVGABIOS is far from ideal, and many, **many** things requiring more direct ac
 Therefore it is **highly recommended**, if possible, to install a legacy-capable video card. If one is present, its Video BIOS
 will be used instead of SeaVGABIOS, providing a much better, pretty much native-like, experience.
 
+## Configuration
+
+CSMWrap supports an optional INI-style configuration file. Place a file named `csmwrap.ini` in the same directory as the CSMWrap EFI executable (e.g. `EFI/BOOT/csmwrap.ini`). If the file is absent, sensible defaults are used.
+
+### Options
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `serial` | bool | `false` | Enable serial debug output |
+| `serial_port` | hex/int | `0x3f8` | Serial I/O port address (COM1=`0x3f8`, COM2=`0x2f8`, COM3=`0x3e8`, COM4=`0x2e8`) |
+| `serial_baud` | int | `115200` | Serial baud rate |
+| `vgabios` | string | *(empty)* | Path to a custom VBIOS file on the ESP (e.g. `\EFI\CSMWrap\vgabios.bin`). When empty, the embedded SeaVGABIOS is used |
+| `iommu_disable` | bool | `true` | Disable IOMMUs (Intel VT-d / AMD-Vi) before legacy boot |
+
+Boolean values accept `true`/`yes`/`1` and `false`/`no`/`0` (case-insensitive). Comments start with `;` or `#`.
+
+### Example
+
+```ini
+; CSMWrap configuration
+serial = true
+serial_port = 0x3f8
+serial_baud = 115200
+vgabios = \EFI\CSMWrap\vgabios.bin
+iommu_disable = true
+```
+
 ## Frequently Asked Questions
 
 ### Is this an emulator?

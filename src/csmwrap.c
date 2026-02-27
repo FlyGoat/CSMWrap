@@ -13,6 +13,7 @@
 #include <time.h>
 #include <bios_proxy.h>
 #include <mptable.h>
+#include <config.h>
 #include <flanterm.h>
 #include <flanterm_backends/fb.h>
 
@@ -544,15 +545,21 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
         sfs_dir = NULL;
     }
 
+    /* Load configuration from csmwrap.ini next to our executable */
+    if (sfs_dir != NULL && loaded_image != NULL) {
+        config_load(sfs_dir, loaded_image->FilePath);
+    }
+
+    /* Load custom VGABIOS from config path if specified */
     EFI_FILE_PROTOCOL *vgabios_file_handle = NULL;
-    if (sfs_dir != NULL) {
-        if (sfs_dir->Open(sfs_dir, &vgabios_file_handle, L"\\EFI\\CSMWrap\\vgabios.bin", EFI_FILE_MODE_READ, 0) == EFI_SUCCESS) {
+    if (sfs_dir != NULL && gConfig.vgabios_path[0] != 0) {
+        if (sfs_dir->Open(sfs_dir, &vgabios_file_handle, gConfig.vgabios_path, EFI_FILE_MODE_READ, 0) == EFI_SUCCESS) {
             UINTN max_size = 256 * 1024;
             if (gBS->AllocatePool(EfiLoaderData, max_size, &vbios_loc) != EFI_SUCCESS) {
                 vbios_loc = NULL;
             } else {
                 if (vgabios_file_handle->Read(vgabios_file_handle, &max_size, vbios_loc) == EFI_SUCCESS) {
-                    printf("Found and loaded '\\EFI\\CSMWrap\\vgabios.bin' file. Using it as our VBIOS!\n");
+                    printf("Loaded custom VBIOS from config. Using it as our VBIOS!\n");
                     vbios_size = max_size;
                 } else {
                     gBS->FreePool(vbios_loc);
@@ -560,7 +567,12 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
                 }
             }
             vgabios_file_handle->Close(vgabios_file_handle);
+        } else {
+            printf("warning: could not open configured vgabios path\n");
         }
+    }
+
+    if (sfs_dir != NULL) {
         sfs_dir->Close(sfs_dir);
     }
 
@@ -675,7 +687,8 @@ retry:
     asm volatile ("cli");
 
     /* Disable IOMMUs before PCI relocation and CSM init */
-    iommu_disable();
+    if (gConfig.iommu_disable)
+        iommu_disable();
 
     /* Prepare APIC for legacy BIOS operation (disable or configure for ExtINT) */
     apic_prepare_for_legacy();
