@@ -13,6 +13,10 @@ struct csmwrap_config {
     uint32_t serial_baud;
     CHAR16 vgabios_path[CONFIG_VGABIOS_PATH_MAX];
     bool iommu_disable;
+    bool vga_specified;
+    uint8_t vga_bus;
+    uint8_t vga_device;
+    uint8_t vga_function;
 };
 
 extern struct csmwrap_config gConfig;

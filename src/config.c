@@ -13,6 +13,10 @@ struct csmwrap_config gConfig = {
     .serial_baud = 115200,
     .vgabios_path = {0},
     .iommu_disable = true,
+    .vga_specified = false,
+    .vga_bus = 0,
+    .vga_device = 0,
+    .vga_function = 0,
 };
 
 static bool char_eq_nocase(char a, char b)
@@ -79,6 +83,66 @@ static bool parse_uint32(const char *val, uint32_t *out)
     return true;
 }
 
+static bool parse_hex_byte(const char *s, size_t len, uint32_t *out)
+{
+    if (len == 0)
+        return false;
+
+    uint32_t result = 0;
+    for (size_t i = 0; i < len; i++) {
+        char c = s[i];
+        uint32_t digit;
+        if (c >= '0' && c <= '9')
+            digit = c - '0';
+        else if (c >= 'a' && c <= 'f')
+            digit = 10 + c - 'a';
+        else if (c >= 'A' && c <= 'F')
+            digit = 10 + c - 'A';
+        else
+            return false;
+        result = result * 16 + digit;
+    }
+    *out = result;
+    return true;
+}
+
+/*
+ * Parse a PCI address in BB:DD.F format (all hex).
+ */
+static bool parse_pci_address(const char *val, uint8_t *bus, uint8_t *device, uint8_t *function)
+{
+    /* Find ':' separator between bus and device */
+    const char *colon = NULL;
+    for (const char *p = val; *p; p++) {
+        if (*p == ':') { colon = p; break; }
+    }
+    if (!colon)
+        return false;
+
+    /* Find '.' separator between device and function */
+    const char *dot = NULL;
+    for (const char *p = colon + 1; *p; p++) {
+        if (*p == '.') { dot = p; break; }
+    }
+    if (!dot)
+        return false;
+
+    uint32_t b, d, f;
+    if (!parse_hex_byte(val, (size_t)(colon - val), &b) || b > 0xFF)
+        return false;
+    if (!parse_hex_byte(colon + 1, (size_t)(dot - colon - 1), &d) || d > 0x1F)
+        return false;
+    size_t flen = 0;
+    while (dot[1 + flen]) flen++;
+    if (!parse_hex_byte(dot + 1, flen, &f) || f > 0x7)
+        return false;
+
+    *bus = (uint8_t)b;
+    *device = (uint8_t)d;
+    *function = (uint8_t)f;
+    return true;
+}
+
 static const char *skip_whitespace(const char *s)
 {
     while (*s == ' ' || *s == '\t')
@@ -138,6 +202,17 @@ static void config_apply(const char *key, const char *val)
             printf("  iommu_disable = %s\n", v ? "true" : "false");
         } else {
             printf("  warning: invalid value for 'iommu_disable': %s\n", val);
+        }
+    } else if (streq_nocase(key, "vga")) {
+        uint8_t b, d, f;
+        if (parse_pci_address(val, &b, &d, &f)) {
+            gConfig.vga_specified = true;
+            gConfig.vga_bus = b;
+            gConfig.vga_device = d;
+            gConfig.vga_function = f;
+            printf("  vga = %02x:%02x.%x\n", b, d, f);
+        } else {
+            printf("  warning: invalid PCI address for 'vga': %s (expected BB:DD.F)\n", val);
         }
     } else {
         printf("  warning: unknown config key '%s'\n", key);

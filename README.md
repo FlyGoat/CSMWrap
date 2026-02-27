@@ -53,6 +53,7 @@ CSMWrap supports an optional INI-style configuration file. Place a file named `c
 | `serial_baud` | int | `115200` | Serial baud rate |
 | `vgabios` | string | *(empty)* | Path to a custom VBIOS file on the ESP (e.g. `\EFI\CSMWrap\vgabios.bin`). When empty, the embedded SeaVGABIOS is used |
 | `iommu_disable` | bool | `true` | Disable IOMMUs (Intel VT-d / AMD-Vi) before legacy boot |
+| `vga` | PCI address | *(empty)* | PCI address of the VGA card to use (e.g. `00:02.0`). Format: `BB:DD.F` (hex). When empty, the first available card is used |
 
 Boolean values accept `true`/`yes`/`1` and `false`/`no`/`0` (case-insensitive). Comments start with `;` or `#`.
 
