@@ -13,6 +13,7 @@ struct csmwrap_config gConfig = {
     .serial_baud = 115200,
     .vgabios_path = {0},
     .iommu_disable = true,
+    .verbose = false,
     .vga_specified = false,
     .vga_bus = 0,
     .vga_device = 0,
@@ -202,6 +203,14 @@ static void config_apply(const char *key, const char *val)
             printf("  iommu_disable = %s\n", v ? "true" : "false");
         } else {
             printf("  warning: invalid value for 'iommu_disable': %s\n", val);
+        }
+    } else if (streq_nocase(key, "verbose")) {
+        bool v;
+        if (parse_bool(val, &v)) {
+            gConfig.verbose = v;
+            printf("  verbose = %s\n", v ? "true" : "false");
+        } else {
+            printf("  warning: invalid value for 'verbose': %s\n", val);
         }
     } else if (streq_nocase(key, "vga")) {
         uint8_t b, d, f;

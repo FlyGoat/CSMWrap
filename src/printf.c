@@ -104,7 +104,7 @@ static void _putchar(int character, void *extra_arg) {
         serial_out((uint8_t)character);
     }
 
-    if (flanterm_ctx != NULL) {
+    if (gConfig.verbose && flanterm_ctx != NULL) {
         flanterm_write(flanterm_ctx, (const char *)&character, 1);
     }
 }

@@ -477,6 +477,7 @@ int set_smbios_table()
 
 void __attribute__((noreturn)) panic(const char *fmt, ...)
 {
+    gConfig.verbose = true;
     printf("\n*** PANIC: ");
     va_list l;
     va_start(l, fmt);
@@ -501,6 +502,7 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
 
     csmwrap_video_early_init(&priv);
 
+    /* Initialise Flanterm (output gated on verbose; panics always show) */
     if (priv.cb_fb.physical_address != 0) {
         flanterm_ctx = flanterm_fb_init(
             flanterm_uefi_malloc, flanterm_uefi_free,
@@ -514,7 +516,10 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
 
     gBS->SetWatchdogTimer(0, 0, 0, NULL);
 
+    /* Banner is always shown on screen */
+    gConfig.verbose = true;
     printf("%s", banner);
+    gConfig.verbose = false;
 
     for (EFI_PHYSICAL_ADDRESS i = 0; i < 0x100000; i += EFI_PAGE_SIZE) {
         EFI_PHYSICAL_ADDRESS j = i;
