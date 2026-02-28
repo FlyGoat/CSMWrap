@@ -14,6 +14,22 @@ uintptr_t vbios_size;
 static bool is_amd_rdna_or_newer(uint16_t vendor_id, uint16_t device_id);
 
 /*
+ * Calculate bits per pixel from linear pixel masks.
+ * Ported from Limine.
+ */
+static uint16_t linear_masks_to_bpp(uint32_t red_mask, uint32_t green_mask,
+                                    uint32_t blue_mask, uint32_t alpha_mask)
+{
+    uint32_t compound_mask = red_mask | green_mask | blue_mask | alpha_mask;
+    uint16_t ret = 32;
+    while ((compound_mask & (1 << 31)) == 0) {
+        ret--;
+        compound_mask <<= 1;
+    }
+    return ret;
+}
+
+/*
  * Find a GOP with a valid framebuffer and set its mode.
  * This is needed for Flanterm and SeaVGABIOS framebuffer access.
  */
@@ -70,10 +86,33 @@ static EFI_STATUS FindGop(struct csmwrap_priv *priv)
                 continue;
             }
 
-            if (Gop->Mode->FrameBufferBase != 0) {
-                found = true;
-                break;
+            if (Gop->Mode->FrameBufferBase == 0) {
+                continue;
             }
+
+            EFI_GRAPHICS_OUTPUT_MODE_INFORMATION *mi = Gop->Mode->Info;
+
+            /* Skip PixelBltOnly and unknown pixel formats */
+            if (mi->PixelFormat >= PixelBltOnly) {
+                continue;
+            }
+
+            /* Reject PixelBitMask modes with all-zero masks */
+            if (mi->PixelFormat == PixelBitMask
+             && (mi->PixelInformation.RedMask
+               | mi->PixelInformation.GreenMask
+               | mi->PixelInformation.BlueMask
+               | mi->PixelInformation.ReservedMask) == 0) {
+                continue;
+            }
+
+            /* Validate pitch: PixelsPerScanLine must be >= HorizontalResolution */
+            if (mi->PixelsPerScanLine < mi->HorizontalResolution) {
+                continue;
+            }
+
+            found = true;
+            break;
         }
 
         if (!found) {
@@ -541,12 +580,10 @@ static EFI_STATUS csmwrap_video_seavgabios_init(struct csmwrap_priv *priv)
     cb_fb->physical_address = fb_addr;
     cb_fb->x_resolution = info->HorizontalResolution;
     cb_fb->y_resolution = info->VerticalResolution;
-    /* Always 32 bbp */
-    cb_fb->bytes_per_line = info->PixelsPerScanLine * 4;
-    cb_fb->bits_per_pixel = 32;
 
     switch (info->PixelFormat) {
         case PixelRedGreenBlueReserved8BitPerColor:
+            cb_fb->bits_per_pixel = 32;
             cb_fb->red_mask_pos = 0;
             cb_fb->red_mask_size = 8;
             cb_fb->green_mask_pos = 8;
@@ -557,6 +594,7 @@ static EFI_STATUS csmwrap_video_seavgabios_init(struct csmwrap_priv *priv)
             cb_fb->reserved_mask_size = 8;
             break;
         case PixelBlueGreenRedReserved8BitPerColor:
+            cb_fb->bits_per_pixel = 32;
             cb_fb->blue_mask_pos = 0;
             cb_fb->blue_mask_size = 8;
             cb_fb->green_mask_pos = 8;
@@ -567,6 +605,22 @@ static EFI_STATUS csmwrap_video_seavgabios_init(struct csmwrap_priv *priv)
             cb_fb->reserved_mask_size = 8;
             break;
         case PixelBitMask:
+            /* Reject modes with all-zero pixel masks */
+            if ((info->PixelInformation.RedMask
+               | info->PixelInformation.GreenMask
+               | info->PixelInformation.BlueMask
+               | info->PixelInformation.ReservedMask) == 0) {
+                printf("PixelBitMask mode with all-zero masks\n");
+                return EFI_UNSUPPORTED;
+            }
+
+            /* Calculate BPP from masks instead of assuming 32 */
+            cb_fb->bits_per_pixel = linear_masks_to_bpp(
+                info->PixelInformation.RedMask,
+                info->PixelInformation.GreenMask,
+                info->PixelInformation.BlueMask,
+                info->PixelInformation.ReservedMask);
+
             // Calculate position (find first set bit, 0 if mask is empty)
             cb_fb->red_mask_pos = info->PixelInformation.RedMask ? __builtin_ffs(info->PixelInformation.RedMask) - 1 : 0;
             cb_fb->green_mask_pos = info->PixelInformation.GreenMask ? __builtin_ffs(info->PixelInformation.GreenMask) - 1 : 0;
@@ -582,6 +636,24 @@ static EFI_STATUS csmwrap_video_seavgabios_init(struct csmwrap_priv *priv)
         default:
             printf("Unsupported pixel format: %d\n", info->PixelFormat);
             return EFI_UNSUPPORTED;
+    }
+
+    /*
+     * Recalculate pitch from gop->Mode->Info, as some firmware (e.g. Apple
+     * Macs) report incorrect PixelsPerScanLine via QueryMode.
+     */
+    cb_fb->bytes_per_line = gop->Mode->Info->PixelsPerScanLine * (cb_fb->bits_per_pixel / 8);
+
+    /* Validate pitch */
+    {
+        uint32_t bytes_per_pixel = cb_fb->bits_per_pixel / 8;
+        if (bytes_per_pixel == 0
+         || cb_fb->bytes_per_line % bytes_per_pixel != 0
+         || cb_fb->bytes_per_line < cb_fb->x_resolution * bytes_per_pixel) {
+            printf("Invalid pitch %u (width=%u, bpp=%u)\n",
+                   cb_fb->bytes_per_line, cb_fb->x_resolution, cb_fb->bits_per_pixel);
+            return EFI_UNSUPPORTED;
+        }
     }
 
     vbios_loc = vgabios_bin;
