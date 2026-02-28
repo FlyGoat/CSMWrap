@@ -26,8 +26,9 @@
 #endif
 
 const char *banner = "CSMWrap Version " BUILD_VERSION "\n"
-                     "https://github.com/flygoat/csmwrap\n"
-                     "By: Jiaxun Yang <jiaxun.yang@flygoat.com>\n";
+                     "https://github.com/FlyGoat/CSMWrap\n"
+                     "By: Jiaxun Yang <jiaxun.yang@flygoat.com>\n"
+                     "And: Mintsuki <mintsuki@protonmail.com>\n";
 
 EFI_SYSTEM_TABLE *gST;
 EFI_BOOT_SERVICES *gBS;

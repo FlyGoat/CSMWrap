@@ -6,29 +6,38 @@ as an out-of-firmware EFI application, effectively creating a compatibility laye
 
 ## Executive Summary
 
-The idea is to drop the 64-bit or 32-bit version of CSMWrap (depending on the hardware, dropping both also works) in a `/EFI/BOOT/`
-directory on a FAT (16 or 32) partition on the medium containing the legacy BIOS OS. UEFI firmware will pick this up and show the
+The idea is to drop the 64-bit or 32-bit version of CSMWrap (depending on the hardware, dropping both also works) into a `/EFI/BOOT/`
+directory on a FAT (12, 16, or 32) partition on the medium containing the legacy BIOS OS. UEFI firmware will pick this up and show the
 medium as a bootable device. Ideally, that's all that would be needed.
 
 1. **Download:** Get the latest `csmwrap<ARCH>.efi` from the [Releases page](https://github.com/FlyGoat/CSMWrap/releases).
-2. **Deploy:** Copy `csmwrap<ARCH>.efi` to the FAT-formatted partition, typically as `EFI/BOOT/BOOTX64.EFI` (for 64-bit) or `EFI/BOOT/BOOTIA32.EFI` (for 32-bit).
-3. **Boot:** Select the UEFI boot entry for CSMWrap.
+2. **Deploy:** Copy `csmwrap<ARCH>.efi` to a FAT-formatted partition, typically as `/EFI/BOOT/BOOTX64.EFI` (for 64-bit)
+  or `/EFI/BOOT/BOOTIA32.EFI` (for 32-bit) (the hardcoded path is needed so that the firmware picks it up automatically).
+3. **Boot:** Select the UEFI boot entry for the drive onto which CSMWrap was deployed.
+
+It is highly recommended that the partition table used is MBR (MS-DOS partition table), as UEFI firmwares are perfectly capable of
+booting off of this format, and because it is the most compatible with most legacy OSes one may want to boot.
 
 ## Additional Prerequisites
 
 ### Secure Boot
 
-Secure boot should be disabled unless one wants to manually sign the CSMWrap EFI application, which is possible.
+Secure boot should be disabled unless one wants to manually sign the CSMWrap EFI application, which is possible, but beyond the
+scope of this README.
 
 ### Firmware Settings
 
 CSMWrap is designed to be as drop-in as possible, without requiring changes to firmware for settings that may not even be exposed
 (depending on the firmware), or that might conflict with other UEFI OSes being multi-booted on the system. That said, if at all
-possible, changing these settings may make things smoother and it is recommended to do so:
+possible, disabling these settings is highly recommended for best legacy OS compatibility:
+
+1. **X2APIC**
+
+Additional settings to try to disable if things still do not work (ideally this should *not* be necessary, please report an issue
+if you need this on your hardware!):
 
 1. **Above 4G Decoding**
 2. **Resizable BAR/Smart Access Memory**
-3. **X2APIC**
 
 ### Video Card Considerations
 
@@ -42,7 +51,8 @@ will be used instead of SeaVGABIOS, providing a much better, pretty much native-
 
 ## Configuration
 
-CSMWrap supports an optional INI-style configuration file. Place a file named `csmwrap.ini` in the same directory as the CSMWrap EFI executable (e.g. `EFI/BOOT/csmwrap.ini`). If the file is absent, sensible defaults are used.
+CSMWrap supports an optional INI-style configuration file. Place a file named `csmwrap.ini` in the same directory as the CSMWrap
+EFI executable (e.g. `/EFI/BOOT/csmwrap.ini`). If the file is absent, sensible defaults are used.
 
 ### Options
 
@@ -51,7 +61,7 @@ CSMWrap supports an optional INI-style configuration file. Place a file named `c
 | `serial` | bool | `false` | Enable serial debug output |
 | `serial_port` | hex/int | `0x3f8` | Serial I/O port address (COM1=`0x3f8`, COM2=`0x2f8`, COM3=`0x3e8`, COM4=`0x2e8`) |
 | `serial_baud` | int | `115200` | Serial baud rate |
-| `vgabios` | string | *(empty)* | Path to a custom VBIOS file on the ESP (e.g. `\EFI\CSMWrap\vgabios.bin`). When empty, the embedded SeaVGABIOS is used |
+| `vgabios` | string | *(empty)* | Path to a custom VBIOS file on the ESP (e.g. `\EFI\CSMWrap\vgabios.bin`). When empty, the card's built-in OpROM is used, and, failing that, SeaVGABIOS is used |
 | `iommu_disable` | bool | `true` | Disable IOMMUs (Intel VT-d / AMD-Vi) before legacy boot |
 | `verbose` | bool | `false` | Show debug output on screen via Flanterm |
 | `vga` | PCI address | *(empty)* | PCI address of the VGA card to use (e.g. `00:02.0`). Format: `BB:DD.F` (hex). When empty, the first available card is used |
@@ -77,14 +87,36 @@ No! At least not in the sense of it being a full-screened emulator window. Runni
 running on the system. CSMWrap attempts to recreate, natively, and as closely as possible, a legacy BIOS PC environment on modern
 UEFI class 3 systems.
 
-### I booted a multi-core capable OS and I am missing a core, what gives?
+### I booted a multi-core capable OS and I am missing a logical processor (thread), what gives?
 
-This is expected. CSMWrap reserves 1 core for "system" use due to the limitations of running out-of-firmware and not being able to
+This is expected. CSMWrap reserves 1 logical processor for "system" use due to the limitations of running out-of-firmware and not being able to
 use [SMM (System Management Mode)](https://en.wikipedia.org/wiki/System_Management_Mode).
+
+Therefore, this means that CSMWrap **does not support running on systems with only 1 logical processor (i.e. only 1 core and no SMT/hyperthreading)**.
+That said, most systems that CSMWrap targets (i.e. modern UEFI class 3 systems) will definitely have way more than a single logical processor,
+so this is mostly a non-issue.
+
+### Does CSMWrap have any advantages over native CSM?
+
+Yes! Native CSM firmware is often riddled with issues and hardly tested against legacy OSes anymore. CSMWrap ships a reliable, free, and open-source
+legacy BIOS implementation - SeaBIOS - and it is tested against legacy OSes. Issues affecting modern, commonly shipped CSM implementations do
+not affect CSMWrap, like for example:
+
+- Dirty control register values at handoff. (This is something that [cregfix](https://github.com/mintsuki/cregfix) was created to work around).
+- Legacy BIOS routines failing to reliably run when called from Virtual 8086 Mode. EMM386, Windows 3.x under 386 enhanced mode, and more, are affected
+  by this issue and it results in crashes. The reason for this is a bit technical for this README file, but CSMWrap is not affected.
+
+And when it comes to improvements that are not necessarily bugs in CSM implementations, CSMWrap, amongst other things:
+
+- Generates MP tables for legacy OSes that support the legacy Intel MultiProcessor Specification standard but not ACPI.
+- Allows one to select a non-primary video card for VGA output which native CSM implementations do not allow. This is useful for
+  multi-booting modern and legacy OSes.
 
 ## Documentation
 
 For detailed installation, usage, advanced scenarios, and troubleshooting, please consult [our Wiki](https://github.com/FlyGoat/CSMWrap/wiki).
+
+Please note that the Wiki is contributed by the community and may be incomplete or inaccurate as per the latest CSMWrap releases!
 
 ## Contributing
 
