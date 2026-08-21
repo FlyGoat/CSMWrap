@@ -224,6 +224,13 @@ static uint32_t convert_memory_type(EFI_MEMORY_TYPE type)
     }
 }
 
+static inline uint8_t cmos_read(uint8_t reg)
+{
+    outb(0x70, 0x80 | reg);
+    outb(0x80, 0);
+    return inb(0x71);
+}
+
 static inline void cmos_write(uint8_t reg, uint8_t val)
 {
     outb(0x70, 0x80 | reg);
@@ -327,6 +334,14 @@ e820_update_cmos(struct csmwrap_priv *priv)
     cmos_write(0x5B, cmos_5b_5d & 0xFF);
     cmos_write(0x5C, (cmos_5b_5d >> 8) & 0xFF);
     cmos_write(0x5D, (cmos_5b_5d >> 16) & 0xFF);
+
+    /* Update the standard AT CMOS checksum after changing bytes in its
+     * covered range (0x10-0x2D). The checksum is stored big-endian. */
+    uint16_t checksum = 0;
+    for (uint8_t reg = 0x10; reg <= 0x2D; reg++)
+        checksum += cmos_read(reg);
+    cmos_write(0x2E, checksum >> 8);
+    cmos_write(0x2F, checksum & 0xFF);
 
     /* Bit 7 of port 0x70 is the chipset NMI mask; clear it so we don't
      * hand off to legacy BIOS with NMI delivery gated. */
